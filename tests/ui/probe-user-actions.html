@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>工坊 · 真实用户操作探针</title>
+<style>
+	html, body { margin: 0; padding: 0; }
+	iframe { display: block; width: 1440px; height: 2600px; border: 0; }
+	#log { position: fixed; top: 0; left: 0; z-index: 9; margin: 0; padding: 8px 10px;
+		max-height: 100vh; overflow: auto; width: 100%;
+		background: #fffbe8; border-bottom: 2px solid #c33;
+		font: 12px/1.55 monospace; color: #111; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<pre id="log">运行中…</pre>
+<iframe id="fr" src="/"></iframe>
+<script>
+/* ==========================================================================
+ * 真实用户操作探针：模拟一个"不按套路出牌"的用户，把页面上每个控件都试一遍。
+ * 结果写进**外层**文档（--dump-dom 只给主 frame）。
+ *
+ * 原则：能用真服务就用真服务（这样测的是真行为），只在需要观察请求体时才装假 fetch。
+ * ========================================================================*/
+var fr = document.getElementById("fr");
+var out = [];
+var pass = 0, fail = 0, facts = [];
+var d, w, origFetch = null, sent = [];
+
+function log(s) { out.push(s); document.getElementById("log").textContent = out.join("\n"); }
+function ok(name, detail) { pass++; log("  [通过] " + name + (detail ? "  — " + detail : "")); }
+function bad(name, detail) { fail++; log("  [失败] " + name + (detail ? "  — " + detail : "")); }
+function check(name, cond, detail) { cond ? ok(name, detail) : bad(name, detail || ""); }
+function fact(s) { facts.push(s); log("  [事实] " + s); }
+function section(t) { log("\n== " + t + " =="); }
+
+function q(sel) { return d.querySelector(sel); }
+function qa(sel) { return Array.prototype.slice.call(d.querySelectorAll(sel)); }
+function id(x) { return d.getElementById(x); }
+function fire(el, type, opts) {
+	el.dispatchEvent(new w.Event(type, Object.assign({ bubbles: true, cancelable: true }, opts || {})));
+}
+function setVal(el, v) { el.value = v; fire(el, "input"); fire(el, "change"); }
+function click(el) { el.click(); }
+function tick(ms) { return new Promise(function (r) { setTimeout(r, ms || 0); }); }
+async function waitFor(cond, tries, step) {
+	tries = tries || 40; step = step || 100;
+	for (var i = 0; i < tries; i++) { if (cond()) return true; await tick(step); }
+	return cond();
+}
+function status() { var e = id("form-status"); return e ? e.textContent.replace(/\s+/g, " ").trim() : ""; }
+function ciStatus() { var e = id("ci-status"); return e ? e.textContent.replace(/\s+/g, " ").trim() : ""; }
+
+async function makeImageFile(name, ww, hh) {
+	var cv = d.createElement("canvas");
+	cv.width = ww; cv.height = hh;
+	var ctx = cv.getContext("2d");
+	ctx.fillStyle = "#3a6ea5"; ctx.fillRect(0, 0, ww, hh);
+	ctx.fillStyle = "#ffd166"; ctx.fillRect(ww * 0.25, hh * 0.25, ww * 0.5, hh * 0.5);
+	var blob = await new Promise(function (r) { cv.toBlob(r, "image/png"); });
+	return new w.File([blob], name, { type: "image/png" });
+}
+function makeAudioFile(name, bytes, type) {
+	var u8 = new Uint8Array(bytes == null ? 64 : bytes);   /* 注意 0 是合法值，不能被 || 吃掉 */
+	for (var i = 0; i < u8.length; i++) u8[i] = (i * 37) % 251;
+	return new w.File([u8], name, { type: type || "audio/mpeg" });
+}
+function setFiles(input, files) {
+	var dt = new w.DataTransfer();
+	files.forEach(function (f) { dt.items.add(f); });
+	input.files = dt.files;
+	fire(input, "change");
+}
+/* 真 fetch：直接打当前服务（页面与工坊同源） */
+function realFetch() { w.fetch = origFetch; }
+/* 假 fetch：只用于观察请求体 */
+function spyFetch(reply) {
+	w.fetch = function (url, init) {
+		sent.push({ url: String(url), body: init && init.body ? String(init.body) : "" });
+		var body = (reply && reply(url)) || { ok: true, path: "/tmp/fake/latest-request.json" };
+		return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(body); } });
+	};
+}
+function lastJson() {
+	for (var i = sent.length - 1; i >= 0; i--) {
+		try { return { url: sent[i].url, data: JSON.parse(sent[i].body) }; } catch (e) { /* 非 JSON */ }
+	}
+	return null;
+}
+function resetSent() { sent = []; }
+function sentTo(pattern) { return sent.filter(function (x) { return x.url.indexOf(pattern) >= 0; }); }
+
+/* 进入某个扩展模式 */
+function pickMode(mode) {
+	var r = d.querySelector('input[name="extMode"][value="' + mode + '"]');
+	r.checked = true; fire(r, "change");
+}
+
+/* 场景夹具：造一个可被「修改已有」解析的扩展目录结构（走真服务解析） */
+async function makeExtensionZip(name) {
+	var files = [
+		["extension.js", 'import { lib, game, ui, get, ai, _status } from "../../noname.js";\nexport const type = "extension";\nexport default function(){ return { name: "' + name + '", connect: true, content(){}, config:{}, help:{}, package:{ character:{ character:{}, characterSort:{ "' + name + '": { g1: ["zh1"] } }, characterTitle:{}, translate:{ zh1: "张三", g1: "自制", "' + name + '": "' + name + '" }, connect: true }, skill:{ skill:{}, translate:{} } } }; }\n'],
+		["info.json", JSON.stringify({ name: name, intro: "探针夹具", author: "t", version: "1" })],
+		["character/character.js", 'const characters = { zh1: { sex: "male", group: "wei", hp: 4, skills: ["sk1"] } };\nconst skills = { sk1: { trigger: { player: "phaseBegin" }, content(){} } };\nconst translates = { zh1: "张三", sk1: "试技", sk1_info: "锁定技。" };\nexport const packs = { character: { connect: true, character: characters, characterSort: { "' + name + '": { g1: ["zh1"] } }, characterTitle: {}, translate: { zh1: "张三", g1: "自制", "' + name + '": "' + name + '" } }, skill: { skill: skills, translate: translates } };\n'],
+	];
+	return { files: files, name: name };
+}
+/* 用 JSZip 造 zip 太重，这里直接走「选择文件夹」那条路：webkitdirectory 的 input
+ * 在无头下不好伪造，所以改用真 zip——由探针页面自己用最小 zip 结构拼一个存放型 zip */
+function crc32(buf) {
+	var table = crc32.table;
+	if (!table) {
+		table = crc32.table = new Uint32Array(256);
+		for (var n = 0; n < 256; n++) {
+			var c = n;
+			for (var k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+			table[n] = c >>> 0;
+		}
+	}
+	var crc = 0xffffffff;
+	for (var i = 0; i < buf.length; i++) crc = table[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+	return (crc ^ 0xffffffff) >>> 0;
+}
+function makeZip(entries) {
+	var enc = new TextEncoder();
+	var parts = [], central = [], offset = 0;
+	entries.forEach(function (e) {
+		var nameB = enc.encode(e[0]), data = enc.encode(e[1]);
+		var crc = crc32(data);
+		var local = new Uint8Array(30 + nameB.length);
+		var dv = new DataView(local.buffer);
+		dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0, true);
+		dv.setUint16(8, 0, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0, true);
+		dv.setUint32(14, crc, true); dv.setUint32(18, data.length, true); dv.setUint32(22, data.length, true);
+		dv.setUint16(26, nameB.length, true); dv.setUint16(28, 0, true);
+		local.set(nameB, 30);
+		parts.push(local, data);
+		var cen = new Uint8Array(46 + nameB.length);
+		var cv = new DataView(cen.buffer);
+		cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+		cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+		cv.setUint16(28, nameB.length, true); cv.setUint32(42, offset, true);
+		cen.set(nameB, 46);
+		central.push(cen);
+		offset += local.length + data.length;
+	});
+	var cenSize = central.reduce(function (n, c) { return n + c.length; }, 0);
+	var end = new Uint8Array(22); var ev = new DataView(end.buffer);
+	ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, entries.length, true);
+	ev.setUint16(10, entries.length, true); ev.setUint32(12, cenSize, true); ev.setUint32(16, offset, true);
+	return new w.File(parts.concat(central, [end]), "fixture.zip", { type: "application/zip" });
+}
+
+/* ── 用例 ─────────────────────────────────────────────────────────────── */
+var cases = [];
+
+/* A1 新建模式：整条链路走真服务 */
+cases.push({ name: "A1 新建模式 · 识别卡面（真服务）", fn: async function () {
+	pickMode("new");
+	setVal(id("f-ext"), "probe_new");
+	var img = await makeImageFile("card.png", 700, 1000);
+	setFiles(id("ci-card"), [img]);
+	await waitFor(function () { return !id("ci-start").disabled; }, 20, 100);
+	check("选了卡面图后按钮可用", !id("ci-start").disabled);
+	realFetch(); resetSent();
+	click(id("ci-start"));
+	var done = await waitFor(function () { return ciStatus().indexOf("已经交给 AI") >= 0; }, 60, 150);
+	check("上传成功并提示去对话侧", done, ciStatus());
+	fact("轮询已启动（每 3 秒一次 /api/card-import）");
+} });
+
+/* A2 加入已有：没选扩展包时识别按钮应禁用 */
+cases.push({ name: "A2 加入已有 · 未选包时按钮禁用", fn: async function () {
+	pickMode("existing");
+	await tick(250);
+	check("切到「加入已有」后识别入口还在", !!id("ci-toggle"));
+	check("扩展名输入变成只读", id("f-ext") && id("f-ext").readOnly, "readOnly=" + (id("f-ext") && id("f-ext").readOnly));
+	if (id("card-import").hidden) { click(id("ci-toggle")); await tick(150); }
+	check("「加入已有」下识别面板可展开", !id("card-import").hidden);
+	setFiles(id("ci-card"), [await makeImageFile("card2.png", 700, 1000)]);
+	await tick(300);
+	check("没选扩展包时「识别卡面」是灰的", id("ci-start").disabled, "disabled=" + id("ci-start").disabled);
+	realFetch(); resetSent();
+	click(id("ci-start"));
+	await tick(600);
+	check("点它也不会走（没有发出上传）", sentTo("/api/card-source").length === 0, ciStatus().slice(0, 60));
+	setVal(id("f-ext"), "probe_pack");
+	await tick(250);
+	check("扩展名填上之后按钮恢复可点", !id("ci-start").disabled, "disabled=" + id("ci-start").disabled);
+	click(id("ci-toggle")); await tick(120);
+	pickMode("new");
+} });
+
+/* A3 修改已有：识别只填空白项 */
+cases.push({ name: "A3 修改已有 · 识别只填空白项", fn: async function () {
+	pickMode("edit");
+	await tick(250);
+	setVal(id("f-name"), "原武将名");
+	setVal(id("f-title"), "原标题");
+	setVal(id("f-hp"), "3/3/0");
+	var t0 = qa("#skill-list .skill-item textarea")[0];
+	if (t0) setVal(t0, "原始技能描述");
+	fact("先造「已载入」状态：name=原武将名 / title=原标题 / hp=3/3/0 / 首技能已填");
+	spyFetch(function (url) {
+		if (url.indexOf("/api/card-import") >= 0) {
+			return { name: "识别出来的名", title: "识别出来的称号", group: "shu", hp: "6/6/0",
+				skills: [{ name: "识别技能", desc: "识别出来的描述" }] };
+		}
+		return { ok: true, path: "/x" };
+	});
+	click(id("ci-start"));
+	await waitFor(function () { return ciStatus().indexOf("识别完成") >= 0; }, 40, 150);
+	check("已填的武将名没被覆盖", id("f-name").value === "原武将名", id("f-name").value);
+	check("已填的称号没被覆盖", id("f-title").value === "原标题", id("f-title").value);
+	check("已填的体力没被覆盖", id("f-hp").value === "3/3/0", id("f-hp").value);
+	check("已填的技能没被覆盖", (qa("#skill-list .skill-item textarea")[0] || {}).value === "原始技能描述",
+		(qa("#skill-list .skill-item textarea")[0] || {}).value);
+	fact("范围提示（念给用户听的那句）：" + ciStatus().slice(0, 100));
+	/* 再把表清空、只留一个空壳，验证空白项能被填上 */
+	click(q('button[type="reset"][form="hero-form"]'));
+	await tick(400);
+	var img = await makeImageFile("a3.png", 640, 900);
+	setFiles(id("ci-card"), [img]);
+	await tick(200);
+	click(id("ci-start"));
+	await waitFor(function () { return id("f-name").value === "识别出来的名"; }, 40, 150);
+	check("表单空白时识别结果照常填入（武将名）", id("f-name").value === "识别出来的名", id("f-name").value);
+	check("表单空白时识别结果照常填入（体力）", id("f-hp").value === "6/6/0", id("f-hp").value);
+	check("表单空白时识别结果照常填入（技能）",
+		(qa("#skill-list .skill-item textarea")[0] || {}).value === "识别出来的描述",
+		(qa("#skill-list .skill-item textarea")[0] || {}).value);
+} });
+
+/* B1 识别面板的清除能力 */
+cases.push({ name: "B1 识别面板 · 选中后能否取消", fn: async function () {
+	realFetch();
+	pickMode("new");
+	var img = await makeImageFile("a.png", 600, 800);
+	setFiles(id("ci-card"), [img]);
+	await tick(300);
+	var nameEl = id("ci-name-card");
+	fact("选图后选择位显示：" + (nameEl ? nameEl.textContent : "?"));
+	fact("面板里没有「清除已选图片」钮：" + !q("#card-import .import-slot__clear"));
+	/* 换个图（重选同类文件） */
+	var img2 = await makeImageFile("b.png", 600, 800);
+	setFiles(id("ci-card"), [img2]);
+	await tick(300);
+	check("重新选图会替换掉上一张", id("ci-name-card").textContent === "b.png", id("ci-name-card").textContent);
+} });
+
+/* B2 整表清空后，识别面板状态如何 */
+cases.push({ name: "B2 清空表单 · 识别面板是否一起复位", fn: async function () {
+	click(q('button[type="reset"][form="hero-form"]'));
+	await tick(300);
+	fact("点清空后，选择位仍是：" + id("ci-name-card").textContent + " / " + id("ci-name-art").textContent);
+	check("卡面选择位没有被清掉（清空只管表单）", id("ci-name-card").textContent !== "选择图片", "仍是 " + id("ci-name-card").textContent);
+	fact("ci-status 仍为：" + (ciStatus() || "（空）"));
+} });
+
+/* B3 轮询途中点清空 → 结果回来会怎样 */
+cases.push({ name: "B3 识别进行中点清空 · 结果回来会不会又填上", fn: async function () {
+	pickMode("new");
+	setVal(id("f-ext"), "probe_b3");
+	setVal(id("f-name"), "用户手填的名");
+	realFetch();
+	var img = await makeImageFile("c.png", 640, 900);
+	setFiles(id("ci-card"), [img]);
+	await tick(200);
+	/* 拦下结果接口，模拟「AI 还没写完 → 稍后写完」 */
+	var pending = null;
+	w.fetch = function (url, init) {
+		if (String(url).indexOf("/api/card-import") >= 0) {
+			return (pending = new Promise(function (res) {
+				setTimeout(function () {
+					res({ ok: true, status: 200, json: function () {
+						return Promise.resolve({ name: "识别出来的名", hp: "5/5/0" });
+					} });
+				}, 1500);
+			}));
+		}
+		return origFetch.call(w, url, init);
+	};
+	click(id("ci-start"));
+	await tick(600);   /* 轮询发出，结果还没到 */
+	click(q('button[type="reset"][form="hero-form"]'));
+	await tick(300);
+	check("清空后武将名是空的", id("f-name").value === "", "值=" + id("f-name").value);
+	await tick(2200);  /* 等那笔结果落地 */
+	fact("清空后迟到的识别结果把表单填成了：" + (id("f-name").value || "（还是空的）") + " / hp=" + id("f-hp").value);
+	check("迟到结果没有把已清空的表单重新填上", id("f-name").value === "", "值=" + id("f-name").value);
+} });
+
+/* C1 配音：删除与排序 */
+cases.push({ name: "C1 配音 · 多文件与删除", fn: async function () {
+	realFetch();
+	/* 打开更多拓展 */
+	var moreBtn = id("more-toggle") || q('.more .btn') || q("#more-panel") && null;
+	fact("更多拓展面板 hidden=" + (id("more-panel") ? id("more-panel").hidden : "无此元素"));
+	if (id("more-panel") && id("more-panel").hidden) {
+		var btn = q("button[data-more]") || qa(".btn").filter(function (b) { return /更多拓展/.test(b.textContent); })[0];
+		if (btn) click(btn);
+		await tick(300);
+	}
+	var audioInput = q('.more-skill input[type="file"][accept="audio/*"]');
+	if (!audioInput) { bad("找不到配音输入框"); return; }
+	setFiles(audioInput, [makeAudioFile("v0.mp3", 100), makeAudioFile("v1.mp3", 100), makeAudioFile("v2.mp3", 100)]);
+	await tick(500);
+	var chips = qa('.more-skill .audio-chip');
+	check("三个音频都进了列表", chips.length === 3, chips.length + " 个");
+	/* 删中间那个 */
+	var before = chips.map(function (c) { return c.querySelector(".audio-chip__name").textContent; });
+	click(chips[1].querySelector(".audio-chip__btn--del"));
+	await tick(300);
+	var after = qa('.more-skill .audio-chip').map(function (c) { return c.querySelector(".audio-chip__name").textContent; });
+	fact("删除前顺序：" + before.join(" | "));
+	fact("删除中间一个之后：" + after.join(" | "));
+	fact("序号是否自动重排：" + after.map(function (c, i) {
+		var idx = qa('.more-skill .audio-chip')[i].querySelector(".audio-chip__index");
+		return idx ? idx.textContent : "?";
+	}).join(" "));
+	/* 排序：每个条目应带「上移 / 下移」，首项的上移、末项的下移禁用 */
+	var chips2 = qa('.more-skill .audio-chip');
+	var moves = chips2[0] ? chips2[0].querySelectorAll(".audio-chip__btn--move") : [];
+	check("每条配音都有上移/下移两个按钮", moves.length === 2, moves.length + " 个");
+	if (moves.length === 2) {
+		check("首条的「上移」是禁用的", moves[0].disabled);
+		var before2 = chips2.map(function (c) { return c.querySelector(".audio-chip__name").textContent; });
+		click(moves[1]);   /* 下移 */
+		await tick(300);
+		var after2 = qa('.more-skill .audio-chip').map(function (c) { return c.querySelector(".audio-chip__name").textContent; });
+		check("点「下移」后两条顺序交换", after2[0] === before2[1] && after2[1] === before2[0],
+			before2.slice(0, 2).join(" | ") + " → " + after2.slice(0, 2).join(" | "));
+		var idx2 = qa('.more-skill .audio-chip .audio-chip__index').map(function (e) { return e.textContent; });
+		check("序号跟着重排", idx2[0] === "第 1 句" && idx2[1] === "第 2 句", idx2.join(" / "));
+	}
+} });
+
+/* C2 配音：超长音频（小体积、假称长时长） */
+cases.push({ name: "C2 配音 · 长时长与边界", fn: async function () {
+	var audioInput = q('.more-skill input[type="file"][accept="audio/*"]');
+	if (!audioInput) { bad("找不到配音输入框"); return; }
+	/* 4.9MB 的 mp3（低于 5MB 上限）—— 体积过，但现实里这种体积可能是几十分钟 */
+	resetSent();
+	setFiles(audioInput, [makeAudioFile("long.mp3", Math.round(4.9 * 1024 * 1024))]);
+	await tick(1200);
+	var n1 = qa('.more-skill .audio-chip').length;
+	fact("4.9MB 音频被收下：" + (n1 > 0) + "（现列表 " + n1 + " 个）");
+	/* 恰好 5MB */
+	setFiles(audioInput, [makeAudioFile("exact5.mp3", 5 * 1024 * 1024)]);
+	await tick(1200);
+	fact("恰好 5MB 的音频状态行：" + status().slice(0, 80));
+	/* 5MB + 1 字节 */
+	setFiles(audioInput, [makeAudioFile("over.mp3", 5 * 1024 * 1024 + 1)]);
+	await tick(1200);
+	fact("5MB+1 的状态行：" + status().slice(0, 80));
+	/* 0 字节 */
+	setFiles(audioInput, [makeAudioFile("empty.mp3", 0)]);
+	await tick(800);
+	check("0 字节文件被拦下并说明", /空文件/.test(status()), status().slice(0, 90));
+	fact("时长目前只做「超过 " + "60 秒" + " 提示一句」的处理，不拦 —— 读不出时长时静默放行");
+} });
+
+/* D1 同一张图既当卡面又当立绘 */
+cases.push({ name: "D1 一张图同时当卡面和立绘", fn: async function () {
+	realFetch();
+	var img = await makeImageFile("same.png", 800, 1000);
+	setFiles(id("ci-card"), [img]);
+	await tick(200);
+	/* 立绘那条路：识别面板的立绘选择位 */
+	setFiles(id("ci-art"), [await makeImageFile("same_as_art.png", 800, 1000)]);
+	await tick(300);
+	var cropper = q(".cropper");
+	fact("识别面板的立绘位选图后，右侧裁剪器状态：" + (cropper ? cropper.className : "无"));
+	check("立绘位选图会同时喂给裁剪器", !!(cropper && /has-image/.test(cropper.className)), cropper ? cropper.className : "");
+} });
+
+/* D2 超大图 */
+cases.push({ name: "D2 超大图（5000×5000）", fn: async function () {
+	realFetch();
+	var big = await makeImageFile("huge.png", 5000, 5000);
+	var t0 = Date.now();
+	setFiles(id("ci-card"), [big]);
+	var okDone = await waitFor(function () { return !id("ci-start").disabled || ciStatus(); }, 60, 150);
+	fact("5000×5000 选图耗时 " + (Date.now() - t0) + "ms，可用=" + !id("ci-start").disabled);
+	setVal(id("f-ext"), "probe_d2");
+	resetSent();
+	var t1 = Date.now();
+	click(id("ci-start"));
+	await waitFor(function () { return ciStatus().indexOf("已经交给 AI") >= 0 || ciStatus().indexOf("没成功") >= 0; }, 120, 200);
+	fact("上传+裁块耗时 " + (Date.now() - t1) + "ms，状态：" + ciStatus().slice(0, 60));
+} });
+
+/* D3 伪装成图片的文本 */
+cases.push({ name: "D3 文本改名成 .jpg", fn: async function () {
+	realFetch();
+	var fake = new w.File([new TextEncoder().encode("这不是图片")], "fake.jpg", { type: "image/jpeg" });
+	setFiles(id("ci-card"), [fake]);
+	await tick(400);
+	fact("伪装文件选入后：选择位=" + id("ci-name-card").textContent + "，按钮可用=" + !id("ci-start").disabled);
+	resetSent();
+	click(id("ci-start"));
+	await waitFor(function () { return ciStatus() && ciStatus().length > 0; }, 40, 150);
+	await tick(1200);
+	fact("点识别后的状态行：" + ciStatus());
+} });
+
+/* D4 连点识别按钮 */
+cases.push({ name: "D4 连点「识别卡面」五次", fn: async function () {
+	realFetch();
+	setVal(id("f-ext"), "probe_d4");
+	setFiles(id("ci-card"), [await makeImageFile("d4.png", 600, 800)]);
+	await tick(300);
+	var btn = id("ci-start");
+	var clicks = 0;
+	for (var i = 0; i < 5; i++) { if (!btn.disabled) { click(btn); clicks++; } await tick(60); }
+	fact("五次点击里实际发出 " + clicks + " 次（按钮在首次点击后 disabled=" + btn.disabled + "）");
+	await waitFor(function () { return ciStatus().indexOf("已经交给 AI") >= 0; }, 60, 200);
+	fact("最终状态行：" + ciStatus().slice(0, 60));
+} });
+
+/* D5 极小图 */
+cases.push({ name: "D5 1×1 像素图", fn: async function () {
+	realFetch();
+	setFiles(id("ci-card"), [await makeImageFile("tiny.png", 1, 1)]);
+	await tick(300);
+	resetSent();
+	click(id("ci-start"));
+	await waitFor(function () { return ciStatus().indexOf("已经交给 AI") >= 0 || ciStatus().indexOf("没成功") >= 0; }, 60, 200);
+	fact("1×1 图形的结果：" + ciStatus().slice(0, 70));
+} });
+
+/* D6 填一半再识别 */
+cases.push({ name: "D6 手填一半 · 再识别", fn: async function () {
+	pickMode("new");
+	setVal(id("f-name"), "我手填的名字");
+	setVal(id("f-hp"), "7/7/0");
+	var sk = qa("#skill-list .skill-item textarea")[0];
+	if (sk) setVal(sk, "我手写的技能描述");
+	spyFetch(function (url) {
+		if (url.indexOf("/api/card-import") >= 0) return { name: "卡面里的名字" };
+		return { ok: true, path: "/x" };
+	});
+	click(id("ci-start"));
+	await waitFor(function () { return id("f-name").value === "卡面里的名字"; }, 40, 150);
+	fact("识别结果只带了 name：现在 f-name=" + id("f-name").value +
+		"，f-hp=" + id("f-hp").value + "，首技能=" + (qa("#skill-list .skill-item textarea")[0] || {}).value);
+	check("未涉及的字段（hp）保留用户手填的值", id("f-hp").value === "7/7/0", id("f-hp").value);
+} });
+
+/* D7 立绘连传两次 */
+cases.push({ name: "D7 立绘位连传两次", fn: async function () {
+	realFetch();
+	setFiles(id("ci-art"), [await makeImageFile("art1.png", 900, 1200)]);
+	await tick(500);
+	var c1 = q(".cropper") && q(".cropper").className;
+	setFiles(id("ci-art"), [await makeImageFile("art2.png", 400, 600)]);
+	await tick(500);
+	var c2 = q(".cropper") && q(".cropper").className;
+	fact("两次传图后裁剪器状态：" + c1 + " → " + c2);
+	check("第二次传图会替换裁剪器里的图", c2 && /has-image/.test(c2), c2);
+} });
+
+/* D8 特殊字符文件名 */
+cases.push({ name: "D8 特殊字符文件名", fn: async function () {
+	realFetch();
+	var weird = await makeImageFile('测试 "引号" <尖括号> &符号.png', 600, 800);
+	setFiles(id("ci-card"), [weird]);
+	await tick(300);
+	fact("选择位显示：" + id("ci-name-card").textContent);
+	check("特殊字符文件名不报错", true);
+} });
+
+/* E1 第四步末尾的「返回」 */
+cases.push({ name: "E1 「更多拓展」末尾的返回按钮", fn: async function () {
+	realFetch();
+	if (id("more-panel").hidden) { click(id("more-toggle")); await tick(400); }
+	check("面板已展开", !id("more-panel").hidden);
+	var back = id("more-back");
+	check("面板末尾有「返回」按钮", !!back);
+	if (!back) return;
+	click(back);
+	await tick(600);
+	check("点「返回」后面板收起", id("more-panel").hidden);
+	var cap = q("#more-toggle .more-toggle__label");
+	check("入口按钮文案回到「更多拓展」", cap && cap.textContent === "更多拓展", cap ? cap.textContent : "无");
+	fact("点返回后的滚动位置 scrollY=" + Math.round(w.scrollY) + "（0 表示回到了工作台顶部）");
+} });
+
+/* ── 运行 ─────────────────────────────────────────────────────────────── */
+fr.addEventListener("load", async function () {
+	d = fr.contentDocument;
+	w = fr.contentWindow;
+	origFetch = w.fetch;
+	Array.prototype.forEach.call(d.querySelectorAll(".reveal"), function (el) { el.classList.add("is-in"); });
+	var st = d.createElement("style");
+	st.textContent = "*{animation:none!important;transition:none!important}";
+	d.head.appendChild(st);
+	await tick(400);
+
+	for (var i = 0; i < cases.length; i++) {
+		var c = cases[i];
+		section(c.name);
+		try {
+			await c.fn();
+		} catch (e) {
+			bad(c.name + "（抛异常）", e && e.message ? e.message : String(e));
+		}
+		realFetch();
+		await tick(150);
+	}
+	log("\n=== 合计：通过 " + pass + " 项，失败 " + fail + " 项；另有 " + facts.length + " 条事实记录 ===");
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+/* ============================================================================
+ * 无名杀 · DIY 工坊 —— 设计令牌
+ * 方向：杂志编辑 / 东方典籍现代主义
+ *
+ * 规则：所有颜色、字阶、间距、圆角、阴影、动效时长都必须从这里取，
+ *       组件样式里禁止硬编码色值或裸数值。
+ * ==========================================================================*/
+
+:root {
+	/* ── 色彩：宣纸、墨、朱砂 ──────────────────────────────────────────────
+	 * 主题为主动选择的「宣纸亮色」，不是默认白底；墨与纸都带暖调，
+	 * 避开纯 #000 / #fff 的廉价对比。全站唯一强调色是朱砂，只给关键动作。 */
+	--color-bg: #f6f2e9;
+	--color-surface: #fbf9f4;
+	--color-surface-sunken: #efe9dc;
+	--color-ink: #1b1916;
+	--color-muted: #6d665b;
+	--color-accent: #c8321e;
+	--color-accent-deep: #a32614;
+	--color-on-accent: #fff8f4;
+	--color-border: rgba(27, 25, 22, 0.14);
+	--color-border-strong: rgba(27, 25, 22, 0.3);
+
+	/* 势力色（用于卡面标识，不作装饰用途） */
+	--group-wei: #2f4f7f;
+	--group-shu: #8c2f2a;
+	--group-wu: #2c6b4f;
+	--group-qun: #6b6353;
+	--group-jin: #6a4a7a;
+	--group-shen: #a8761f;
+	--group-none: #8a8278;
+
+	/* ── 字体 ──────────────────────────────────────────────────────────────
+	 * **全部走系统字体栈，不引外链字体**：这是本地工具，要能离线用，
+	 * 也不该把页面渲染押在对第三方 CDN 的连通性上（中文网络环境尤其如此）。
+	 * 中文衬线取系统自带的（Noto Serif CJK / 宋体等），不下几 MB 中文字体；
+	 * 拉丁展示字退到系统衬线，等宽退到系统 mono 栈。 */
+	--font-display: "LXGW WenKai", "霞鹜文楷", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "SimSun", Georgia, serif;
+	--font-display-latin: Georgia, "Times New Roman", "Noto Serif CJK SC", "Songti SC", serif;
+	--font-body: "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+	--font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+	/* 字阶：模块化 1.25，全站只用这些值 */
+	--text-xs: 12px;
+	--text-sm: 13px;
+	--text-base: 16px;
+	--text-lg: 20px;
+	--text-xl: 25px;
+	--text-2xl: 31px;
+	--text-3xl: 39px;
+	--text-display: clamp(38px, 5.4vw, 76px);
+
+	/* 行高 */
+	--leading-tight: 1.08;
+	--leading-snug: 1.35;
+	--leading-normal: 1.75;
+
+	/* 字距 */
+	--tracking-display: -0.02em;
+	--tracking-wide: 0.14em;
+
+	/* ── 间距：4 / 8 / 12 / 16 / 24 / 40 / 64 / 96 ───────────────────────── */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 40px;
+	--space-7: 64px;
+	--space-8: 96px;
+
+	/* ── 圆角：典籍感取小值，刻意不用大圆角 ─────────────────────────────── */
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 8px;
+	--radius-pill: 999px;
+
+	/* ── 阴影：三级高度，阴影带暖色而非纯黑 ─────────────────────────────── */
+	--shadow-1: 0 2px 8px rgba(72, 52, 32, 0.06);
+	--shadow-2: 0 8px 28px rgba(72, 52, 32, 0.1);
+	--shadow-3: 0 24px 64px rgba(72, 52, 32, 0.16);
+
+	/* ── 动效 ──────────────────────────────────────────────────────────── */
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+	--dur-fast: 160ms;
+	--dur-base: 320ms;
+	--dur-slow: 640ms;
+
+	/* ── 版式常量 ──────────────────────────────────────────────────────── */
+	--measure: 68ch;
+	--rail-width: 400px;
+	--frame-max: 1440px;
+}

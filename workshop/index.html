@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>无名杀 · DIY 工坊</title>
+		<meta name="description" content="把一句武将构想，做成能进游戏的扩展。" />
+
+		<!-- 字体全部走系统栈（见 styles/tokens.css 顶部说明）：不引外链，离线可用 -->
+
+		<link rel="stylesheet" href="styles/tokens.css" />
+		<link rel="stylesheet" href="styles/base.css" />
+		<link rel="stylesheet" href="styles/components.css" />
+	</head>
+
+	<body class="atmosphere grain">
+		<div class="page">
+			<!-- ── 报头 ───────────────────────────────────────────────────── -->
+			<header class="masthead reveal">
+				<div class="masthead__rule" aria-hidden="true"></div>
+				<div class="masthead__row">
+					<div class="masthead__brand">
+						<span class="masthead__mark">无名杀</span>
+						<h1 class="masthead__title">DIY 工坊</h1>
+					</div>
+					<dl class="masthead__meta">
+						<div>
+							<dt>规范</dt>
+							<dd>扩展开发规范</dd>
+						</div>
+						<div>
+							<dt>校勘</dt>
+							<dd>官方规则集</dd>
+						</div>
+					</dl>
+				</div>
+				<p class="masthead__lede">
+					写下一个武将的名字、势力与技能构想，裁好他的立绘，可以在中间的卡面预览他的样式。
+					确认无误后交给 AI 落成代码 —— 校验、写入、打包都由工具链兜底。
+				</p>
+			</header>
+
+			<!-- ── 主体：设定栏 / 卡面 / 立绘裁剪 ─────────────────────────── -->
+			<main class="workshop">
+				<!-- 左：设定栏 -->
+				<section class="composer reveal" aria-labelledby="composer-title">
+					<div class="section-head">
+						<h2 id="composer-title" class="section-title">武将设定</h2>
+						<div class="section-head__tools">
+							<button
+								type="button"
+								class="section-action"
+								id="ci-toggle"
+								aria-expanded="false"
+								aria-controls="card-import"
+							>识别卡面</button>
+							<span class="section-index" aria-hidden="true">壹</span>
+						</div>
+					</div>
+
+					<!-- 手上有做好的卡面 → 传两张图，AI 认出来自动填表单。
+					     默认收起：工作台是「四周填、中间看」，这块不该杵在表单最上面。 -->
+					<section class="import-box" id="card-import" aria-labelledby="import-title" hidden>
+						<div class="import-box__head">
+							<h3 class="import-box__title" id="import-title">已经有卡面了？上传自动填</h3>
+							<p class="import-box__hint">一张卡面图，再加一张立绘原图。</p>
+						</div>
+
+						<div class="import-box__slots">
+							<label class="import-slot" id="ci-slot-card">
+								<input type="file" id="ci-card" accept="image/*" hidden />
+								<span class="import-slot__label">卡面图</span>
+								<span class="import-slot__name" id="ci-name-card">选择图片</span>
+							</label>
+							<label class="import-slot" id="ci-slot-art">
+								<input type="file" id="ci-art" accept="image/*" hidden />
+								<span class="import-slot__label">立绘原图<em class="import-slot__opt">可选</em></span>
+								<span class="import-slot__name" id="ci-name-art">选择图片</span>
+							</label>
+						</div>
+
+						<div class="import-box__foot">
+							<button type="button" class="btn btn--primary" id="ci-start" disabled>识别卡面</button>
+							<span class="import-box__status" id="ci-status" role="status"></span>
+						</div>
+					</section>
+
+					<form class="form" id="hero-form" novalidate autocomplete="off">
+						<fieldset class="field field--group">
+							<legend class="field__label">扩展到</legend>
+							<div class="choice-row" role="radiogroup" aria-label="扩展到哪个扩展">
+								<label class="choice">
+									<input type="radio" name="extMode" value="new" checked />
+									<span>新建扩展</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="extMode" value="existing" />
+									<span>加入已有</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="extMode" value="edit" />
+									<span>修改已有</span>
+								</label>
+							</div>
+							<div class="field field--nested">
+								<label class="field__label" for="f-ext" id="ext-label">扩展名</label>
+								<!-- 新建 / 加入已有 共用一个输入框；
+								     加入已有时右侧长出一个「选择 zip」按钮，仍是一个框 -->
+								<div class="field__control">
+									<input
+										class="field__input"
+										id="f-ext"
+										name="extName"
+										type="text"
+										maxlength="24"
+										placeholder="例如：我的扩展"
+										autocomplete="off"
+									/>
+									<button type="button" class="field__inline-btn" id="ext-pick" hidden>
+										选择 zip
+									</button>
+								</div>
+								<input type="file" id="f-ext-dir" accept=".zip,application/zip" class="visually-hidden" />
+
+								<!-- 修改已有：外形和上面那个框一致，点它展开「文件夹 / 压缩包」 -->
+								<div id="f-ext-existing" hidden>
+									<details class="picker">
+										<summary class="field__input picker__summary">选择扩展包</summary>
+										<div class="picker__menu">
+											<button type="button" class="picker__item" id="edit-pick-dir">
+												选择文件夹（推荐手动解压后选择此项）
+											</button>
+											<button type="button" class="picker__item" id="edit-pick-zip">
+												选择压缩包（zip）
+											</button>
+											<button type="button" class="picker__item" id="edit-pick-official">
+												官方包（当模板，做自己的武将）
+											</button>
+											<button type="button" class="picker__item" id="edit-pick-workspace">
+												工作区里已有的扩展（不用上传）
+											</button>
+										</div>
+									</details>
+									<input type="file" id="edit-dir-input" webkitdirectory directory multiple hidden />
+									<input type="file" id="edit-zip-input" accept=".zip,application/zip" hidden />
+
+									<!-- 官方包：包 → 武将两级 + 搜索。
+									     官方武将只读、只能当模板，改完落成自己的扩展，不动游戏本体。 -->
+									<div class="official" id="official-picker" hidden>
+										<select class="field__input" id="official-pack" aria-label="选择官方包">
+											<option value="">— 读取中 —</option>
+										</select>
+										<div class="official__row">
+											<input
+												class="field__input"
+												id="official-search"
+												type="text"
+												placeholder="搜武将名…"
+												autocomplete="off"
+												aria-label="搜武将名"
+											/>
+											<select class="field__input" id="official-char" aria-label="选择官方武将">
+												<option value="">— 先选包 —</option>
+											</select>
+										</div>
+										<p class="field__hint">
+											官方武将只当模板：改完做成你自己的扩展，游戏里那个原武将不受影响。
+										</p>
+									</div>
+
+									<!-- 工作区里已有的扩展：直接读目录，不用再找 zip。
+									     选中的那个目录就是「修改已有」的就地改写落点（uploadPath）。
+									     样式复用 .official 那套（两个下拉 + 说明文字）。 -->
+									<div class="official" id="workspace-picker" hidden>
+										<select class="field__input" id="workspace-ext" aria-label="选择工作区里已有的扩展">
+											<option value="">— 读取中 —</option>
+										</select>
+										<select class="field__input" id="workspace-char" aria-label="选择要改的武将">
+											<option value="">— 先选扩展 —</option>
+										</select>
+										<p class="field__hint">
+											直接从工作区里挑，不用再找 zip。改动由 AI 就地落盘，原文件会先备份。
+										</p>
+									</div>
+								</div>
+
+								<p class="field__hint" id="ext-hint">
+									文件夹名即扩展名。新增的武将直接落进它里面，不必事后和旧内容合并。
+								</p>
+							</div>
+						</fieldset>
+
+						<div class="field">
+							<label class="field__label" for="f-name" id="name-label">武将名</label>
+							<input
+								class="field__input"
+								id="f-name"
+								name="name"
+								type="text"
+								maxlength="12"
+								placeholder="例如：灰猫"
+								autocomplete="off"
+							/>
+							<!-- 修改已有：先选扩展，再从里面挑武将 -->
+							<select class="field__input" id="f-name-existing" hidden aria-label="选择要修改的武将">
+								<option value="">— 请先选择扩展 —</option>
+							</select>
+							<p class="field__hint" id="name-hint">显示名，会写入 <code>translate</code></p>
+						</div>
+
+						<div class="field">
+							<label class="field__label" for="f-title">称号</label>
+							<input
+								class="field__input"
+								id="f-title"
+								name="title"
+								type="text"
+								maxlength="16"
+								placeholder="例如：混世喵王"
+								autocomplete="off"
+							/>
+						</div>
+
+						<fieldset class="field field--group">
+							<legend class="field__label">势力</legend>
+							<div class="choice-row" role="radiogroup" aria-label="势力">
+								<label class="choice">
+									<input type="radio" name="group" value="wei" checked />
+									<span>魏</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="group" value="shu" />
+									<span>蜀</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="group" value="wu" />
+									<span>吴</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="group" value="qun" />
+									<span>群</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="group" value="jin" />
+									<span>晋</span>
+								</label>
+								<label class="choice">
+									<input type="radio" name="group" value="shen" />
+									<span>神</span>
+								</label>
+								<!-- 自定义势力：与其它按钮同尺寸的空白框，点进去直接打字 -->
+								<div class="choice choice--custom" title="自定义势力：直接在这里输入">
+									<input
+										type="text"
+										class="choice__input"
+										id="f-group-custom"
+										aria-label="自定义势力"
+										autocomplete="off"
+									/>
+								</div>
+							</div>
+						</fieldset>
+
+						<div class="field-row">
+							<fieldset class="field field--group">
+								<legend class="field__label">性别</legend>
+								<div class="choice-row" role="radiogroup" aria-label="性别">
+									<label class="choice">
+										<input type="radio" name="sex" value="male" checked />
+										<span>男</span>
+									</label>
+									<label class="choice">
+										<input type="radio" name="sex" value="female" />
+										<span>女</span>
+									</label>
+									<label class="choice">
+										<input type="radio" name="sex" value="double" />
+										<span>双性</span>
+									</label>
+									<label class="choice">
+										<input type="radio" name="sex" value="none" />
+										<span>无</span>
+									</label>
+									<!-- 就这四个：官方编辑器里性别只有 男/女/双性/无
+									     （引擎按 hasSex() 判定，别的值等于「不男不女」，
+									     所以这里不给自定义输入框） -->
+								</div>
+							</fieldset>
+
+							<div class="field field--hp">
+								<label class="field__label" for="f-hp" title="依次是体力 / 体力上限 / 护甲">体力/上限/护甲</label>
+								<input
+									class="field__input field__input--num"
+									id="f-hp"
+									name="hp"
+									type="text"
+									value="4/4/0"
+									autocomplete="off"
+									spellcheck="false"
+									title="依次是体力 / 体力上限 / 护甲，如 4/6/2；护甲不填就是 0。斜杠删不掉，删它前面的数字就行"
+								/>
+							</div>
+						</div>
+
+						<!-- 扩展包介绍：写进 info.json 的 intro。它是**整包**级说明，
+						     不是这一个武将的 —— 所以 hint 里必须讲明白，
+						     免得用户以为填的是「这个武将的介绍」 -->
+						<div class="field">
+							<label
+								class="field__label"
+								for="f-intro"
+								title="写进那个扩展 info.json 的 intro；支持简单的 HTML 标签，比如 <b>粗体</b>"
+								>扩展包介绍</label
+							>
+							<textarea
+								class="field__input field__input--area"
+								id="f-intro"
+								name="intro"
+								rows="2"
+								placeholder="这个扩展是做什么的（可选）"
+							></textarea>
+							<p class="field__hint">整个扩展的说明，不是这一个武将的。游戏「扩展」页里点开能看到。</p>
+						</div>
+
+						<!-- 资料页四字段 + 选将包名：都是 info.json / 翻译表的纯 KV。
+						     全部可选，空值不进 payload（同 intro：别把已有扩展的资料清掉）。 -->
+						<div class="field">
+							<span class="field__label">资料页与选将包名</span>
+							<div class="field-row field-row--half">
+								<input class="field__input" id="f-author" name="author" type="text" maxLength="24" placeholder="作者（可选）" aria-label="作者" autocomplete="off" />
+								<input class="field__input" id="f-version" name="version" type="text" maxLength="16" placeholder="版本（可选，如 1.0）" aria-label="版本" autocomplete="off" />
+							</div>
+							<input class="field__input" id="f-packname" name="packDisplayName" type="text" maxLength="20" placeholder="选将界面里的包名（可选，默认用扩展名）" aria-label="选将包名" autocomplete="off" />
+							<p class="field__hint">都是整个扩展的资料：作者与版本显示在游戏「扩展」页；包名是选将界面里这批武将挂的那一行的名字。</p>
+						</div>
+
+						
+					</form>
+				</section>
+
+				<!-- 中：卡面 -->
+				<section class="stage reveal" aria-labelledby="stage-title">
+					<div class="section-head">
+						<h2 id="stage-title" class="section-title">卡面</h2>
+						<span class="section-index" aria-hidden="true">贰</span>
+					</div>
+
+					<article class="hero-card" id="hero-card" data-group="wei" aria-live="polite">
+						<div class="hero-card__inner">
+							<span class="hero-card__group" id="card-group">魏</span>
+
+							<div class="hero-card__pips" id="card-pips" role="img" aria-label="体力 4"></div>
+
+							<div class="hero-card__art" id="card-art">
+								<canvas class="hero-card__art-canvas" id="card-art-canvas" aria-hidden="true"></canvas>
+								<p class="hero-card__art-empty" id="card-art-empty">
+									立绘待裁剪<br /><span>右侧上传后拖出构图</span>
+								</p>
+							</div>
+
+							<div class="hero-card__column">
+								<span class="hero-card__title" id="card-title">混世喵王</span>
+								<h3 class="hero-card__name" id="card-name">灰猫</h3>
+							</div>
+
+							<div class="hero-card__skills" id="card-skills"></div>
+						</div>
+					</article>
+
+					<!-- 技能设定：放在卡面下方，左栏因此保持紧凑 -->
+					<div class="skills-panel">
+						<div class="skills-head">
+							<span class="field__label">技能</span>
+							<button type="button" class="btn btn--ghost btn--tight" id="add-skill">
+								+ 添加技能
+							</button>
+						</div>
+						<div class="skill-list" id="skill-list"></div>
+						<p class="field__hint">
+							写清 <strong>触发 / 频率 / 目标 / 数值 / 边界</strong>，歧义越少，AI 问得越少
+						</p>
+					</div>
+				</section>
+
+				<!-- 右：立绘裁剪 -->
+				<section class="crop-col reveal" aria-labelledby="crop-title">
+					<div class="section-head">
+						<h2 id="crop-title" class="section-title">立绘</h2>
+						<span class="section-index" aria-hidden="true">叁</span>
+					</div>
+
+					<div class="cropper" id="cropper">
+						<div class="cropper__viewport" id="cropper-viewport" aria-label="立绘裁剪区">
+							<img class="cropper__image" id="cropper-image" alt="待裁剪的立绘" hidden />
+							<p class="cropper__empty" id="cropper-empty">
+								把图片拖到这里<br /><span>或点击下方「选择图片」</span>
+							</p>
+							<div class="cropper__grid" aria-hidden="true"></div>
+							<div class="cropper__edge" aria-hidden="true"></div>
+						</div>
+
+						<div class="cropper__panel">
+							<input type="file" id="cropper-file" accept="image/*" class="visually-hidden" />
+							<button type="button" class="btn btn--ghost" id="cropper-pick">选择图片</button>
+
+							<div class="cropper__control">
+								<label class="cropper__control-label" for="cropper-zoom">缩放</label>
+								<input
+									class="cropper__range"
+									id="cropper-zoom"
+									type="range"
+									min="1"
+									max="4"
+									step="0.01"
+									value="1"
+									disabled
+								/>
+							</div>
+
+							<button type="button" class="btn btn--ghost" id="cropper-export" disabled>
+								单独下载头像
+							</button>
+
+							<p class="cropper__spec">头像规格 <code>350 × 464</code> · 单独下载的文件名是武将名，提交时会由 AI 按角色 ID 改名落进扩展</p>
+							<p class="cropper__hint">
+								拖动图片调整位置，滚轮或滑块缩放。裁好后会自动同步到左侧卡面，并在提交时一并交给 AI —— 不需要手动导出。
+							</p>
+
+
+<!-- 更多拓展：展开页面最下面那一步（肆）。按钮在右侧栏底部，
+							     展开后落在整页最后 —— 首屏不动，要深入的人自己往下走。 -->
+							<button
+								type="button"
+								class="btn btn--ghost more-toggle"
+								id="more-toggle"
+								aria-expanded="false"
+								aria-controls="more-panel"
+							>
+								<span class="more-toggle__label">更多拓展</span>
+								<span class="more-toggle__mark" aria-hidden="true">＋</span>
+							</button>
+						</div>
+								<div class="form__actions">
+									<button class="btn btn--primary" type="submit" id="btn-handoff" form="hero-form">
+									提交给 AI
+									<span class="btn__mark" aria-hidden="true">→</span>
+								</button>
+									<button class="btn btn--ghost" type="reset" form="hero-form">清空</button>
+								</div>
+								<p class="form__status" id="form-status" role="status">
+									填好后点「提交给 AI」，再回到 AI 对话窗口让 AI 接着做 —— 有歧义它会在那边问你。
+								</p>
+					</div>
+				</section>
+
+				<!-- 肆：更多拓展（默认收起）────────────────────────────────────
+				     台词与配音从「技能」卡里搬到这里，技能名与数量跟上面同步；
+				     再加阵亡台词、皮肤与多形态。都是可选项，不填就不生成。
+				     版式沿用全站的宣纸令牌，小节用细线与带字距的小字编号分隔。 -->
+				<section class="more reveal" id="more-panel" hidden aria-labelledby="more-title">
+					<div class="section-head">
+						<h2 id="more-title" class="section-title">更多拓展</h2>
+						<span class="section-index" aria-hidden="true">肆</span>
+					</div>
+					<p class="more__lede">
+						台词、阵亡台词、皮肤形态都在这里写。不填也能做，填了武将更完整。
+					</p>
+
+												<div class="more-grid">
+					<div class="more-col more-col--fill">
+						<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其一</span>皮肤与多形态</p>
+																		<div class="skin-list" id="skin-list"></div>
+																		<button type="button" class="btn btn--ghost btn--tight" id="add-skin">
+																			＋ 添加形态
+																		</button>
+																		<p class="field__hint">
+																			同一武将的换装或变身形态。图片会自动裁成 <code>350 × 464</code>；
+																			想精细构图，点卡片的「调整」拖拽、滚轮缩放。给形态填了「变身名」，AI 就会把它做成
+																			<b>技能可变身</b>的形态（发动相应技能时牌上名字跟着变）——
+																			变身时机写在对应技能的「补充说明」里，AI 照它来写；
+																			不填则只是玩家可手选的皮肤。
+																		</p>
+																	</div>
+
+						<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其二</span>武将列传</p>
+																		<textarea
+																			class="field__input field__input--area"
+																			id="f-intro-bio"
+																			name="characterIntro"
+																			rows="4"
+																			maxLength="1000"
+																			placeholder="这个武将的生平（可选）：点开武将详情页时显示的那段文字。可以让 AI 帮你写。"
+																			aria-label="武将列传"
+																		></textarea>
+																		<p class="field__hint">
+																			每个武将一小篇几百字的生平。留空提交后可在对话里说「给XX写个列传」，AI 会按史实写好再落盘。
+																		</p>
+																	</div>
+					</div>
+
+					<div class="more-col more-col--fill">
+						<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其三</span>技能台词与配音</p>
+																		<div class="more-skills" id="more-skills"></div>
+																	</div>
+
+
+					</div>
+
+					<div class="more-col">
+						<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其四</span>宗族</p>
+																		<input
+																			class="field__input"
+																			id="f-clan"
+																			name="clan"
+																			type="text"
+																			maxLength="16"
+																			placeholder="宗族名（可选，如：吴郡陆氏）"
+																			aria-label="宗族名"
+																		/>
+																		<p class="field__hint">
+																			宗族本身不带机制，是给宗族技判断「同宗」用的。勾了「宗族技」记得填这里。
+																		</p>
+																	</div>
+
+						<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其五</span>阵亡台词</p>
+																		<label class="visually-hidden" for="f-die">阵亡台词</label>
+																		<textarea
+																			class="field__input field__input--area"
+																			id="f-die"
+																			name="dieLines"
+																			rows="2"
+																			placeholder="阵亡时念的话，一行一句（可选）"
+																		></textarea>
+																		<p class="field__hint">玩家点开武将介绍时，能在「阵亡台词」里看到这些话。</p>
+																	</div>
+
+																							<div class="more-block">
+																		<p class="more-block__label"><span class="more-block__num">其六</span>国战</p>
+																		<div class="gz-row">
+																			<label class="gz-field">
+																				<span class="gz-field__label">国战归属</span>
+																				<select id="f-gz-group" class="field__input">
+																					<option value="">不指定</option>
+																					<option value="wei">魏</option>
+																					<option value="shu">蜀</option>
+																					<option value="wu">吴</option>
+																					<option value="qun">群</option>
+																					<option value="jin">晋</option>
+																				</select>
+																			</label>
+																			<div class="gz-field">
+																				<span class="gz-field__label">多势力（亮势力时挑一个）</span>
+																				<div class="gz-groups" id="gz-groups">
+																					<label class="gz-check"><input type="checkbox" value="wei" />魏</label>
+																					<label class="gz-check"><input type="checkbox" value="shu" />蜀</label>
+																					<label class="gz-check"><input type="checkbox" value="wu" />吴</label>
+																					<label class="gz-check"><input type="checkbox" value="qun" />群</label>
+																					<label class="gz-check"><input type="checkbox" value="jin" />晋</label>
+																				</div>
+																			</div>
+																		</div>
+																		<p class="field__hint">
+																			平时势力不动，这里只管国战。神武将、自定义势力在国战里没有对应的势力，
+																			才需要指定归属；多势力是亮势力时可以挑一个。选「晋」要玩家那边有带晋势力的玩法（如江山如故）。
+																		</p>
+																	</div>
+															<div class="more-foot">
+																		<button type="button" class="btn btn--ghost btn--back" id="more-back">返回</button>
+																	</div>
+					</div>
+				</div>
+
+				</section>
+			</main>
+
+			<!-- 形态裁剪弹窗：点形态卡片的「调整」在网页中央弹出，交互照抄右侧立绘裁剪器
+			     （拖拽移动 + 滚轮缩放 + 缩放滑杆）。状态独立，不碰右侧立绘裁剪器。 -->
+			<div class="skin-crop-modal" id="skin-crop-modal" hidden>
+				<div class="skin-crop-modal__backdrop" id="skin-crop-backdrop"></div>
+				<div class="skin-crop-modal__panel" role="dialog" aria-label="调整形态构图">
+					<div class="skin-crop-modal__head">
+						<span class="skin-crop-modal__title">调整形态构图</span>
+						<button type="button" class="btn btn--ghost btn--tight" id="skin-crop-close">关闭</button>
+					</div>
+					<div class="cropper__viewport" id="skin-crop-viewport" aria-label="形态裁剪区">
+						<img class="cropper__image" id="skin-crop-image" alt="待裁剪的形态" hidden />
+						<p class="cropper__empty" id="skin-crop-empty">正在载入图片…</p>
+					</div>
+					<div class="skin-crop-modal__foot">
+						<label class="skin-crop-modal__zoom-label" for="skin-crop-zoom">缩放</label>
+						<input type="range" class="skin-crop-modal__zoom" id="skin-crop-zoom" min="1" max="4" step="0.01" value="1" />
+						<span class="skin-crop-modal__grow"></span>
+						<button type="button" class="btn btn--ghost" id="skin-crop-cancel">取消</button>
+						<button type="button" class="btn btn--primary" id="skin-crop-save">确定</button>
+					</div>
+				</div>
+			</div>
+
+			<footer class="colophon reveal">
+				<div class="colophon__rule" aria-hidden="true"></div>
+				<p class="colophon__line">
+					工坊只写扩展目录，从不改动游戏本体 · 覆盖前自动备份 · 产出可分享给任何人
+				</p>
+			</footer>
+		</div>
+
+		<script src="scripts/main.js"></script>
+	</body>
+</html>

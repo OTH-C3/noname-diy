@@ -1,0 +1,184 @@
+/* ============================================================================
+ * 基础层：重置、排版骨架、氛围、焦点、动效降级
+ * ==========================================================================*/
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+/* [hidden] 的 display:none 会被任何显式 display 覆盖
+ * （.btn 的 inline-flex、.cropper__empty 的 grid……），这里统一兜底。
+ * 这个问题先后在裁剪器空态、扩展文件夹按钮上各出现过一次，此处一并修正。 */
+[hidden] {
+	display: none !important;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--color-bg);
+	color: var(--color-ink);
+	font-family: var(--font-body);
+	font-size: var(--text-base);
+	line-height: var(--leading-normal);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4 {
+	margin: 0;
+	font-family: var(--font-display);
+	font-weight: 600;
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-display);
+	text-wrap: pretty;
+}
+
+p {
+	margin: 0;
+	max-width: var(--measure);
+	text-wrap: pretty;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+/* 按钮不是正文：禁止内部文字被选中。
+ * 否则快速连点会把按钮上的字选成蓝色高亮 —— 技能卡头部的「收起」最容易中招。 */
+button,
+[role="button"],
+label,
+select,
+input[type="checkbox"],
+input[type="radio"] {
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* 反向：输入控件必须能选中文字。
+ * 上面那条的 user-select 会向下继承，把「自定义势力」那个输入框也锁死。
+ * 注意范围：只豁免文本类输入（text/textarea）—— 勾选框、单选、下拉
+ * 属于「点击型控件」，双击/拖拽会把标签文字选蓝，必须保持不可选中。 */
+input[type="text"],
+input[type="url"],
+textarea {
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+/* ── 键盘可达：焦点圈必须可见（2px 描边 + 2px 偏移） ───────────────────── */
+:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+::selection {
+	background: var(--color-accent);
+	color: var(--color-on-accent);
+}
+
+/* ── 氛围层：淡朱砂晕染 + 纸纹噪点 ──────────────────────────────────────
+ * 两层都固定在视口、pointer-events: none，不参与交互也不影响排版。 */
+.atmosphere::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 0;
+	background:
+		radial-gradient(48rem 32rem at 8% -12%, rgba(200, 50, 30, 0.1), transparent 62%),
+		radial-gradient(40rem 30rem at 104% 4%, rgba(106, 74, 122, 0.07), transparent 58%),
+		radial-gradient(56rem 40rem at 50% 118%, rgba(60, 45, 30, 0.08), transparent 60%);
+}
+
+.grain::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 1;
+	opacity: 0.055;
+	mix-blend-mode: multiply;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 内容层压在氛围层之上 */
+.page {
+	position: relative;
+	z-index: 2;
+}
+
+/* ── 入场序列：一次编排，4 组错峰 80ms ────────────────────────────────── */
+.reveal {
+	opacity: 0;
+	transform: translateY(18px);
+}
+
+.reveal.is-in {
+	opacity: 1;
+	transform: none;
+	transition:
+		opacity var(--dur-slow) var(--ease-out),
+		transform var(--dur-slow) var(--ease-out);
+}
+
+.reveal:nth-child(1) {
+	transition-delay: 0ms;
+}
+
+.reveal:nth-child(2) {
+	transition-delay: 80ms;
+}
+
+.reveal:nth-child(3) {
+	transition-delay: 160ms;
+}
+
+.reveal:nth-child(4) {
+	transition-delay: 240ms;
+}
+
+/* ── 动效降级：用户在系统里关掉动效时，一切立即到位 ──────────────────── */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+
+	.reveal {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+/* ── 无障碍工具类 ────────────────────────────────────────────────────── */
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
+}

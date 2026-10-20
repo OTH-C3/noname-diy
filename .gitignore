@@ -1,0 +1,23 @@
+# 打包产物
+*.zip
+*.skill
+
+# 测试探针：跑第 2/3 层时临时拷进 workshop/ 的页面，跑完就该删
+workshop/_functest.html
+workshop/_probe.html
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/

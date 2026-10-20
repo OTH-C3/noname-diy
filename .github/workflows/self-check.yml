@@ -1,0 +1,195 @@
+name: 自检
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: JS 语法检查
+        run: |
+          find . -name "*.mjs" -not -path "./node_modules/*" -print0 \
+            | xargs -0 -I{} node --check {}
+
+      - name: 工坊前端 JS 语法检查
+        run: |
+          # 上面那条只扫 *.mjs，工坊前端 main.js 一直不在门里 —— 它是最容易
+          # 出低级语法错的一块（改动也最频繁），单独点名。
+          # 只查 workshop/：样本扩展按引擎的 ESM 写法，这边不去碰。
+          find workshop -name "*.js" -print0 | xargs -0 -I{} node --check {}
+
+      - name: Python 语法检查
+        run: |
+          for f in scripts/*.py tests/*.py; do python3 -m py_compile "$f"; done
+
+      - name: skill 结构自检
+        run: |
+          # 发布出去的东西，结构错了别人装不上。查三类：
+          #   ① frontmatter 必需字段（agent_created 少了会让 skill 后续无法被程序化修改）
+          #   ② name 命名规范（hyphen-case，官方校验脚本的要求）
+          #   ③ SKILL.md 里提到的 references/ 路径是否真的存在（改名/搬文件最容易漏）
+          python3 - <<'PY'
+          import os, re, sys
+
+          s = open("SKILL.md", encoding="utf-8").read()
+          m = re.match(r"^---\n(.*?)\n---", s, re.S)
+          if not m:
+              sys.exit("SKILL.md 缺 YAML frontmatter")
+          fm = m.group(1)
+          bad = []
+          for field in ("name:", "description:", "agent_created:"):
+              if field not in fm:
+                  bad.append("frontmatter 缺 " + field)
+          name = re.search(r"name:\s*(.+)", fm).group(1).strip()
+          if not re.match(r"^[a-z0-9-]+$", name) or "--" in name:
+              bad.append("name 不是 hyphen-case：" + name)
+          if re.search(r"description:\s*(.+)", fm).group(1) and ("<" in fm.split("description:")[1].split("\nlicense")[0]):
+              bad.append("description 含尖括号")
+
+          # SKILL.md 里引用的 references/ 路径必须存在
+          # 跳过带占位或通配的：references/version-notes/<版本>.md、...技能速查-*.md
+          for p in sorted(set(re.findall(r"references/[\w\u4e00-\u9fff./*?<>-]+", s))):
+              if any(c in p for c in "<>*?"):
+                  continue
+              if not os.path.exists(p.rstrip(".,；、)`")):
+                  bad.append("SKILL.md 引用了不存在的路径：" + p)
+
+          if bad:
+              for b in bad:
+                  print("::error::" + b)
+              sys.exit(1)
+          print("结构自检通过（frontmatter / 命名 / 引用路径）")
+          PY
+
+      - name: 检查脚本对正确样本应通过
+        run: |
+          node scripts/check-extension.mjs tests/samples/testgood
+          echo "正确样本通过"
+
+      - name: 检查脚本对故意写坏的样本应报错
+        run: |
+          if node scripts/check-extension.mjs tests/samples/testbad; then
+            echo "::error::坏样本竟然通过了检查 —— 检查脚本可能已经失效"
+            exit 1
+          fi
+          echo "坏样本被正确拦下"
+
+      - name: 打包脚本应产出合法 zip
+        run: |
+          python3 scripts/pack-extension.py tests/samples/testgood /tmp/out.zip
+          python3 - <<'PY'
+          import zipfile
+          z = zipfile.ZipFile("/tmp/out.zip")
+          names = z.namelist()
+          assert "extension.js" in names, "zip 根目录没有 extension.js"
+          assert z.testzip() is None, "zip 内有坏文件"
+          print("zip 校验通过：", len(names), "个文件")
+          PY
+
+      - name: 解压脚本应能定位扩展根
+        run: |
+          rm -rf /tmp/unpacked
+          out=$(python3 scripts/unpack-extension.py /tmp/out.zip /tmp/unpacked)
+          echo "$out"
+          echo "$out" | grep -q "扩展根" || { echo "::error::解压脚本没输出扩展根"; exit 1; }
+
+      - name: 工坊 handoff —— 三种模式的行为
+        run: |
+          # 起一个临时工作区与服务
+          export DIY_WORKSPACE=$(mktemp -d)
+          export DIY_PORT=18765
+          node workshop/server/server.mjs > /tmp/srv.log 2>&1 &
+          SRV=$!
+          sleep 3
+
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+
+          BASE = "http://127.0.0.1:18765/api/handoff"
+
+          def post(payload):
+              req = urllib.request.Request(
+                  BASE, data=json.dumps(payload).encode(),
+                  headers={"content-type": "application/json"})
+              try:
+                  d = json.load(urllib.request.urlopen(req, timeout=20))
+                  return 200, d
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode())
+
+          base = {"extName": "wf_test", "name": "测试武将", "hp": "4/6", "skills": []}
+
+          # 新建模式：第一次应成功
+          code, _ = post({**base, "extMode": "new"})
+          assert code == 200, f"新建应成功，实际 {code}"
+
+          # 修改已有：即使扩展不存在，也不该被查重拦下（这是曾经的 bug）
+          code, body = post({
+              **base, "extMode": "edit",
+              "editTarget": {"extName": "wf_test", "characterId": "wf_hero",
+                             "source": "installed", "original": {}},
+          })
+          assert code == 200, f"修改已有不该被查重拦住，实际 {code}：{body}"
+
+          # 且 editTarget 必须落盘
+          import os
+          p = os.path.join(os.environ["DIY_WORKSPACE"], ".diy-workshop", "latest-request.json")
+          d = json.load(open(p, encoding="utf-8"))
+          assert d.get("editTarget", {}).get("characterId") == "wf_hero", "editTarget 没落盘"
+
+          # 体力是「体力/体力上限」的文本（如 4/6），服务端不许改写形状 ——
+          # 一旦被当数字处理，斜杠后面的上限就没了。
+          assert d.get("hp") == "4/6", f"体力应原样落盘，实际 {d.get('hp')!r}"
+
+          print("handoff 三种模式行为正确，editTarget 已落盘")
+
+          # 「全自动」（ACP）已按需求移除：这几个接口必须不存在，
+          # 免得日后有人顺手加回来又把页面拽回后台跑任务那条路。
+          for dead in ("/api/generate", "/api/reply", "/api/finish"):
+              try:
+                  urllib.request.urlopen(urllib.request.Request(
+                      "http://127.0.0.1:18765" + dead, data=b"{}",
+                      headers={"content-type": "application/json"}), timeout=10)
+                  raise SystemExit(f"{dead} 居然还能访问 —— 全自动接口应该已经删掉")
+              except urllib.error.HTTPError as e:
+                  assert e.code == 404, f"{dead} 应返回 404，实际 {e.code}"
+          print("全自动接口确认已移除（404）")
+          PY
+
+          kill $SRV || true
+
+      - name: 文档不许出现「实机验证」这类表述
+        run: |
+          # 这个 skill 不负责进游戏实测，所以文档里不该有「待实机验证 / 未实测」
+          # 这类免责话（2026-10-09 已全清）。规则书原文引文用的是「尚未确定」
+          # 等其他词，不受影响。
+          if grep -rn "实机" . --include="*.md" --include="*.mjs" --include="*.js" \
+               | grep -v "^./.git" ; then
+            echo "::error::文档里又出现了「实机」字样 —— 这个 skill 不做进游戏实测"
+            exit 1
+          fi
+          echo "文档无「实机」字样"
+
+      - name: SKILL.md 体量检查
+        run: |
+          python3 - <<'PY'
+          b = len(open("SKILL.md", encoding="utf-8").read().encode("utf-8"))
+          est = b / 2.5 / 1000
+          # 6.5k 是项目自定的阈值（不是平台限制）：SKILL.md 每轮对话都全量进上下文，
+          # 太长会挤占工作空间。真嫌紧就调这里，但先考虑把可查阅的内容挪去 references/。
+          print(f"SKILL.md 约 {est:.1f}k tokens（上限 6.5k）")
+          raise SystemExit(0 if est < 6.5 else 1)
+          PY

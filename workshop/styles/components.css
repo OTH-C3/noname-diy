@@ -1,0 +1,1983 @@
+/* ============================================================================
+ * 组件层：报头、设定栏、卡面、立绘裁剪
+ * 所有色值/间距/时长一律取 tokens.css 的变量，不硬编码。
+ * ==========================================================================*/
+
+.page {
+	max-width: var(--frame-max);
+	margin: 0 auto;
+	padding: var(--space-6) var(--space-6) var(--space-7);
+}
+
+/* ── 报头 ────────────────────────────────────────────────────────────── */
+.masthead {
+	margin-bottom: var(--space-7);
+}
+
+.masthead__rule,
+.colophon__rule {
+	height: 1px;
+	background: var(--color-border-strong);
+}
+
+.masthead__row {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--space-6);
+	padding-top: var(--space-5);
+}
+
+.masthead__mark {
+	display: block;
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-wide);
+	text-transform: uppercase;
+	color: var(--color-muted);
+	margin-bottom: var(--space-2);
+}
+
+.masthead__title {
+	font-size: var(--text-display);
+	font-weight: 600;
+	letter-spacing: var(--tracking-display);
+	margin-left: -0.04em;
+}
+
+.masthead__meta {
+	display: flex;
+	gap: var(--space-6);
+	margin: 0;
+	padding-top: var(--space-2);
+	text-align: right;
+}
+
+.masthead__meta dt {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-wide);
+	color: var(--color-muted);
+}
+
+.masthead__meta dd {
+	margin: var(--space-1) 0 0;
+	font-size: var(--text-sm);
+	color: var(--color-ink);
+}
+
+.masthead__lede {
+	margin-top: var(--space-5);
+	font-size: var(--text-lg);
+	line-height: var(--leading-snug);
+	color: var(--color-muted);
+	max-width: 48ch;
+}
+
+/* ── 主体三栏：设定 / 卡面 / 立绘 ─────────────────────────────────────── */
+.workshop {
+	display: grid;
+	grid-template-columns: var(--rail-width) minmax(300px, 1fr) minmax(280px, 320px);
+	gap: var(--space-6);
+	align-items: start;
+}
+
+.section-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding-bottom: var(--space-3);
+	border-bottom: 1px solid var(--color-border);
+	margin-bottom: var(--space-5);
+}
+
+.section-title {
+	font-size: var(--text-xl);
+	font-weight: 600;
+}
+
+.section-index {
+	font-family: var(--font-display);
+	font-size: var(--text-base);
+	color: var(--color-muted);
+	letter-spacing: var(--tracking-wide);
+}
+
+/* ── 设定栏表单 ──────────────────────────────────────────────────────── */
+.form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-5);
+}
+
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+.field--group {
+	border: 0;
+	padding: 0;
+	margin: 0;
+}
+
+.field-row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: var(--space-4);
+	/* 底部对齐：让两列的控件（性别按钮 / 体力输入框）落在同一条线上，
+	 * 而不是被 legend 与 label 的高度差带偏。 */
+	align-items: end;
+}
+
+/* 统一控件高度，底部对齐后才会真正齐平 */
+.field-row .choice,
+.field-row .field__input {
+	height: 44px;
+	min-height: 44px;
+}
+
+/* 两列等宽变体：资料页的作者/版本、网盘/论坛这一类纯 KV 对 */
+.field-row--half {
+	grid-template-columns: 1fr 1fr;
+}
+
+/* fieldset 的 legend 默认带内边距与浮动行为，这里统一成普通标签 */
+.field--group > legend {
+	display: block;
+	float: none;
+	width: 100%;
+	padding: 0;
+	margin: 0;
+}
+
+.field__label {
+	font-size: var(--text-sm);
+	font-weight: 500;
+	color: var(--color-muted);
+	padding: 0;
+}
+
+.field__input {
+	width: 100%;
+	padding: var(--space-3) var(--space-3);
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	color: var(--color-ink);
+	font-family: var(--font-body);
+	font-size: var(--text-base);
+	transition:
+		border-color var(--dur-fast) var(--ease-out),
+		box-shadow var(--dur-fast) var(--ease-out),
+		background var(--dur-fast) var(--ease-out);
+}
+
+.field__input::placeholder {
+	color: var(--color-muted);
+}
+
+.field__input:hover {
+	border-color: var(--color-border-strong);
+}
+
+.field__input:focus {
+	outline: none;
+	border-color: var(--color-accent);
+	box-shadow: 0 0 0 3px rgba(200, 50, 30, 0.12);
+}
+
+.field__input--num {
+	width: 84px;
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+}
+
+/* 体力：标签与框内文字都居中，两者在同一条中线上（输入框是定宽窄框，
+ * 左对齐的标签会显得跟内容错开）。
+ * 标签是「体力/上限/护甲」三段，字号收小一档才放得下一行 —— 放不下就会
+ * 撑宽右列，把性别的第 4 个按钮挤到第二行（2026-10-10 已发生过）。 */
+.field--hp .field__label {
+	text-align: center;
+	font-size: var(--text-xs);
+	white-space: nowrap;
+}
+
+.field__input--area {
+	resize: vertical;
+	min-height: 96px;
+	line-height: var(--leading-snug);
+}
+
+/* 技能卡里的「技能描述」框：比通用文本框矮一档。
+ * 用独立的修饰类而不改 .field__input--area —— 那个类左栏的
+ * 「扩展包介绍」也在用，全局改会连带动左栏高度、把底对齐算错。
+ *
+ * 80px 是算出来的：展开卡 = 126 + 描述框高，两张默认展开卡加间距
+ * 要刚好塞进 .skill-list 的 429px（见下），
+ *   2 × (126 + 80) + 12 = 424 ≤ 429，留 5px 免得抖动出一根滚动条。 */
+.field__input--skill-desc {
+	min-height: 80px;
+}
+
+/* 台词框：一行一句，矮一点、行距紧一点 ——
+   技能卡里放进两个标准高度的框会被撑得很难看 */
+.field__input--lines {
+	min-height: 56px;
+	line-height: 1.5;
+}
+
+/* ── 技能配音 ────────────────────────────────────────────────────────
+   一行标签 + 若干「文件片」。音频按顺序对应第 1 句、第 2 句台词，
+   所以片子里要把序号写出来。 */
+.skill-audio {
+	margin-top: var(--space-1);
+	padding-top: var(--space-1);
+	border-top: 0.5px dashed var(--color-border-tertiary, rgba(0, 0, 0, 0.15));
+}
+
+.skill-audio__head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.skill-audio__label {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+.skill-audio__hint {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+.skill-audio__list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.audio-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	border: 0.5px solid var(--color-border-tertiary, rgba(0, 0, 0, 0.15));
+	border-radius: 999px;
+	background: var(--color-surface-sunken);
+	font-size: var(--text-xs);
+}
+
+.audio-chip__index {
+	color: var(--color-muted);
+	white-space: nowrap;
+}
+
+.audio-chip__name {
+	max-width: 170px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.audio-chip__size {
+	color: var(--color-muted);
+	white-space: nowrap;
+}
+
+.audio-chip__btn {
+	border: 0;
+	background: transparent;
+	padding: 0 2px;
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	cursor: pointer;
+}
+
+.audio-chip__btn:hover {
+	color: var(--color-ink);
+}
+
+.audio-chip__btn--del {
+	font-size: 14px;
+	line-height: 1;
+}
+
+/* 上移 / 下移：顺序即「第几句」。首末项禁用时压暗，别让人以为点了没反应。 */
+.audio-chip__btn--move {
+	font-size: 12px;
+	line-height: 1;
+}
+
+.audio-chip__btn--move:disabled {
+	opacity: 0.3;
+	cursor: default;
+}
+
+/* ── 更多拓展（肆） ────────────────────────────────────────────────────
+   版式语言沿用全站令牌：宣纸底、墨字、细线。小节之间**只用细线和
+   带字距的小字编号**分隔，不用卡片框、不用阴影、不用强调色 ——
+   参照 Kenya Hara（MUJI）那一路的编辑式极简：留白承担结构。
+   动效压到最低：只淡入 + 位移 6px，并尊重 reduced-motion。 */
+.more {
+	/* 独占一整行：上面是三栏布局，第四步是「换一章」。
+	 * 内部再分两列（与上面版式呼应），不留大空白。 */
+	grid-column: 1 / -1;
+	margin-top: var(--space-8);
+	padding-top: var(--space-7);
+	border-top: 1px solid var(--color-border);
+}
+
+/* 第四步内部三列，按小节编号两两一组 —— 其一其二 ｜ 其三其四 ｜ 其五其六。
+ * 为什么不按「高度就近」硬凑：那样会把「皮肤」单独塞进一列，
+ * 没加形态时那列只剩一个按钮和一行说明，底下空掉一大片（量出来空 624px）。
+ * 按编号分组则每列都是两节，读起来顺、高度也不会一边倒。
+ *
+ * 宽度 6 : 6 : 4 —— 左中两列要宽：
+ *  · 其一「技能台词与配音」控件最密（台词 / 配音 / 七个类型勾选 / 补充说明），
+ *    而它的高度被 .more-skills 的 480px 上限锁死，加宽不增高、纯赚可读性；
+ *  · 其三「皮肤与多形态」要 ≥460px 才排得下 3 张卡（低于这个数掉到 2 张，
+ *    块高直接翻倍），480px 留了余量。
+ * 末列只放输入框 + 长提示，窄一点反而把高度填满。 */
+.more-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 6fr) minmax(0, 6fr) minmax(0, 4fr);
+	gap: var(--space-7) var(--space-6);
+	/* 三列等高：stretch 让短列跟着最长那列走，
+	 * 中间技能栏才能拉到底、与右列的「返回」按钮对齐。 */
+	align-items: stretch;
+}
+
+.more-col {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* 标了 --fill 的列：让最后一块把整列撑满到底（与右列「返回」按钮底部齐平）。
+ * 中间列只有「其一 技能台词」一块，它就是 last-child；
+ * 左列的最后一块是「其二 阵亡台词」。
+ * flex-basis 用 0 而不是 auto：auto 会拿内容高度当基准，内容一多就把列撑高，
+ * 滚动就失效了；0 + min-height:0 让高度只由「最长的那列」决定，内容超出走内部滚动。 */
+.more-col--fill > .more-block:last-child {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* 撑满块里的技能列表跟着拉伸，最后一张技能卡吃掉剩余高度 ——
+ * 卡片有可见边框，所以「框延伸到列底」是看得见的。
+ * 同时去掉 more-skills 自己的 480px 限高：列已经等高，内部不再单独限。 */
+.more-col--fill > .more-block:last-child > .more-skills {
+	flex: 1 1 auto;
+	min-height: 0;
+	/* 最多放约两张技能卡（实测两张展开约 877px），再多就内部滚动，
+	 * 不把整列越撑越高 */
+	max-height: 880px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+/* 卡片默认可压缩：1~2 张时被列高约束，正好填满、不滚动 */
+.more-col--fill > .more-block:last-child > .more-skills > .more-skill {
+	flex-shrink: 1;
+}
+
+/* 3 张及以上：卡片不再压缩，保持原高，交给容器滚动 */
+.more-col--fill > .more-block:last-child > .more-skills:has(> .more-skill:nth-child(3)) > .more-skill {
+	flex-shrink: 0;
+}
+
+/* 只有 1~2 张时，最后一张填满剩余高度（对齐返回按钮） */
+.more-col--fill > .more-block:last-child > .more-skills > .more-skill:last-child {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* 3 张及以上：最后一张不再拉伸，交给容器滚动 */
+.more-col--fill > .more-block:last-child > .more-skills:has(> .more-skill:nth-child(3)) > .more-skill:last-child {
+	flex: none;
+}
+
+/* 只让「直接子元素」的多行输入框撑满（现在就是左列的武将列传），
+ * 不用后代选择器 —— 否则会把技能卡里的「补充说明」也撑高，
+ * 2 张技能的自然高度就超过列高，出现不该有的滚动。 */
+.more-col--fill > .more-block:last-child > .field__input--area {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.more:not([hidden]) {
+	animation: more-in var(--dur-slow) var(--ease-out) both;
+}
+
+@keyframes more-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.more:not([hidden]) {
+		animation: none;
+	}
+}
+
+.more__lede {
+	max-width: var(--measure);
+	margin: var(--space-3) 0 var(--space-6);
+	font-size: var(--text-sm);
+	line-height: var(--leading-normal);
+	color: var(--color-muted);
+}
+
+.more-block + .more-block {
+	margin-top: var(--space-7);
+	padding-top: var(--space-6);
+	border-top: 1px solid var(--color-border);
+}
+
+.more-block__label {
+	margin: 0 0 var(--space-4);
+	font-size: var(--text-sm);
+	color: var(--color-ink);
+	letter-spacing: 0.02em;
+}
+
+/* 小节编号：小字 + 宽字距 + 淡色，像书页上的眉批 */
+.more-block__num {
+	margin-right: var(--space-3);
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	letter-spacing: var(--tracking-wide);
+}
+
+/* 每个技能一块：左侧一条细线表示归属，不套边框盒 */
+.more-skill {
+	padding-left: var(--space-4);
+	border-left: 1px solid var(--color-border);
+}
+
+.more-skill + .more-skill {
+	margin-top: var(--space-6);
+}
+
+.more-skill__head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin-bottom: var(--space-2);
+}
+
+.more-skill__index {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	letter-spacing: var(--tracking-wide);
+	padding: 0;
+	width: auto;
+}
+
+.more-skill__name {
+	font-family: var(--font-display);
+	font-size: var(--text-base);
+	color: var(--color-ink);
+}
+
+.more-skill__empty {
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+
+/* 「更多拓展」按钮：右栏底部，与其它按钮同宽 */
+.more-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	width: 100%;
+	margin-top: var(--space-3);
+}
+
+.more-toggle__mark {
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	transition: transform var(--dur-base) var(--ease-out);
+}
+
+.more-toggle[aria-expanded="true"] .more-toggle__mark {
+	transform: rotate(45deg);
+}
+
+/* 皮肤形态：小横卡，缩略图是主角 */
+/* 皮肤：竖版卡片，图占满卡宽。
+ * 图本来就被裁成 350 × 464，这里用同一比例 + contain ——
+ * 比例一致时 contain 与 cover 等价，但万一混进别的比例的图，
+ * contain 也只会留白、不会裁掉任何一块（「完整显示图片」）。 */
+.skin-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+	gap: var(--space-3);
+	margin-bottom: var(--space-3);
+	/* 形态多了不往下无限溢出：满一行后就在框内滚动。
+	 * 一行 = 单卡高度 375px（缩略图 160 + 两个输入框 + 提示 + 按钮行），
+	 * 再加的就进滚动区，不再把这一块越撑越高。 */
+	max-height: 375px;
+	overflow-y: auto;
+	padding-right: 2px;
+	scrollbar-gutter: stable;
+}
+
+/* 一个形态都还没加时，只占一条提示，不再按 350:464 撑一个高格子
+ * （原先空着约 247px，整列看起来像缺了块内容）。 */
+.skin-list:empty {
+	grid-template-columns: 1fr;
+	max-height: none;
+	overflow: visible;
+}
+
+.skin-list:empty::before {
+	content: "还没有形态，点下面「＋ 添加形态」选图（自动裁成 350 × 464）";
+	display: grid;
+	place-items: center;
+	min-height: 72px;
+	padding: var(--space-3);
+	border: 1px dashed var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-sunken);
+	color: var(--color-muted);
+	font-size: var(--text-xs);
+	line-height: 1.6;
+	text-align: center;
+}
+
+.skin-chip {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-2);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface);
+}
+
+.skin-chip__thumb {
+	width: 100%;
+	/* 限高让卡片紧凑些：一屏能多看到几个形态，不用一直滚。
+	 * 图仍按原比例缩放（contain），不会被拉变形。 */
+	max-height: 160px;
+	aspect-ratio: 350 / 464;
+	object-fit: contain;
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-sunken);
+}
+
+.skin-chip__fields {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.skin-chip__name {
+	width: 100%;
+}
+
+.skin-chip__note {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+.skin-chip__actions {
+	display: flex;
+	/* 「调整」「移除」居中，别贴着左边（原先默认 flex-start，两张卡片宽度一变就歪） */
+	justify-content: center;
+	gap: var(--space-1);
+}
+
+.skin-crop-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 120;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 16px;
+}
+
+.skin-crop-modal[hidden] {
+	display: none;
+}
+
+.skin-crop-modal__backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.55);
+}
+
+.skin-crop-modal__panel {
+	position: relative;
+	width: min(420px, 92vw);
+	max-height: 92vh;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 12px;
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: 12px;
+	box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+}
+
+.skin-crop-modal__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.skin-crop-modal__title {
+	font-weight: 600;
+}
+
+.skin-crop-modal__foot {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.skin-crop-modal__zoom-label {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+.skin-crop-modal__zoom {
+	flex: 1;
+}
+
+.skin-crop-modal__grow {
+	flex: 1;
+}
+
+.field__hint {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	line-height: 1.6;
+}
+
+/* 国战：归属下拉与多势力勾选并排，同样走细线与留白，不用卡片框 */
+.gz-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-5);
+}
+
+.gz-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+.gz-field__label {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	letter-spacing: 0.02em;
+}
+
+.gz-field select {
+	width: auto;
+	min-width: 132px;
+}
+
+/* 与 select 同高，两列齐平（勾选行天然矮一截） */
+.gz-groups {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-height: 38px;
+}
+
+.gz-check {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	font-size: var(--text-sm);
+	color: var(--color-ink);
+}
+
+/* 第四步技能块里的类型勾选行（锁定/限定/觉醒/转换/主公/宗族） */
+.skill-flags {
+	margin-top: var(--space-2);
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+}
+
+.field__hint code {
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+	color: var(--color-muted);
+	background: var(--color-surface-sunken);
+	padding: 1px var(--space-1);
+	border-radius: var(--radius-sm);
+}
+
+/* 嵌套字段：「扩展到」里包着的扩展名输入 */
+.field--nested {
+	margin-top: var(--space-3);
+}
+
+/* 技能列表：一个技能一张可单独删除的小卡 */
+.skills-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+}
+
+.btn--tight {
+	min-height: 34px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-sm);
+}
+
+/* ── 技能列表 / 更多拓展的技能区：限高内部滚动 ────────────────────────
+ * 技能加多了不把方框撑破：超过限高就内部滚，页面不再被无限拉长。
+ * 滑动条与卡面那张技能列表用的是同一套（scrollbar-width: thin +
+ * 4px 墨色半透明），观感一致；不溢出时不占位、不留白。 */
+.skill-list,
+.more-skills,
+.skin-list {
+	overflow-y: auto;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(27, 25, 22, 0.3) transparent;
+}
+
+.skill-list::-webkit-scrollbar,
+.more-skills::-webkit-scrollbar,
+.skin-list::-webkit-scrollbar {
+	width: 4px;
+}
+
+.skill-list::-webkit-scrollbar-thumb,
+.more-skills::-webkit-scrollbar-thumb,
+.skin-list::-webkit-scrollbar-thumb {
+	background: rgba(27, 25, 22, 0.28);
+	border-radius: 2px;
+}
+
+.skill-list::-webkit-scrollbar-track,
+.more-skills::-webkit-scrollbar-track,
+.skin-list::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.skill-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	margin-top: var(--space-2);
+	/* 高度定死，让技能面板的底（连同下方那行提示）与左栏的底对齐 ——
+	 * 列表顶是定值（卡面高度固定），所以对齐值也算得出来：
+	 *   左栏底 1447 − 列表顶 987 − 列表与提示行间距 12 − 提示行高 19 = 429
+	 * 不用 vh：左栏高度本身是定值，用 vh 一换窗口高度就对不齐了。
+	 * 两张默认展开卡实测 456px，把描述框从 3 行压到 2 行后降到 412px，
+	 * 才装得进这 429px —— 这是「调矮方框」与「两张必须完整可见」的交点。 */
+	max-height: 429px;
+}
+
+/* 第四步「技能台词与配音」：同理限高。单个技能块本身很高（台词 +
+ * 配音 + 类型 + 补充说明），所以这里不要求「两张必须可见」，
+ * 直接按屏高给一档，多了就滚。 */
+.more-skills {
+	max-height: clamp(300px, 52vh, 480px);
+}
+
+.skill-item {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.skill-item:focus-within {
+	border-color: var(--color-accent);
+}
+
+.skill-item__head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.skill-item__index {
+	font-family: var(--font-display);
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	letter-spacing: 0.08em;
+	white-space: nowrap;
+}
+
+/* 折叠时这一行就是全部内容：技能名摘要 */
+.skill-item__preview {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--text-sm);
+	color: var(--color-ink);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.skill-item__toggle {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	white-space: nowrap;
+}
+
+.skill-item__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+/* 折叠态：收起正文、压扁留白，列表不再无限拉长 */
+.skill-item[data-open="false"] {
+	padding: var(--space-2) var(--space-3);
+}
+
+.skill-item[data-open="false"] .skill-item__body {
+	display: none;
+}
+
+.skill-item[data-open="false"] .skill-item__preview {
+	color: var(--color-muted);
+}
+
+.skill-item__remove {
+	width: 30px;
+	height: 30px;
+	display: grid;
+	place-items: center;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--color-muted);
+	font-size: var(--text-lg);
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		color var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out);
+}
+
+.skill-item__remove:hover {
+	color: var(--color-accent);
+	border-color: var(--color-border-strong);
+}
+
+.skill-item__remove:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
+.skill-item__remove:disabled:hover {
+	color: var(--color-muted);
+	border-color: transparent;
+}
+
+/* 势力 / 性别选择：药丸按钮，选中态用朱砂描边而非填充 */
+.choice-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+
+.choice-row--compact {
+	flex-wrap: nowrap;
+}
+
+.choice {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 48px;
+	min-height: 44px;
+	padding: 0 var(--space-4);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	color: var(--color-muted);
+	font-size: var(--text-base);
+	cursor: pointer;
+	/* label 也是按钮（不是 [role=button]），同样要禁止选中文字 */
+	user-select: none;
+	-webkit-user-select: none;
+	transition:
+		border-color var(--dur-fast) var(--ease-out),
+		color var(--dur-fast) var(--ease-out),
+		background var(--dur-fast) var(--ease-out);
+}
+
+/* 只对 radio 生效：本意是让单选框隐形并铺满整个药丸。
+ * 千万不能写成 .choice input —— 那会把自定义势力的文本框也设成
+ * opacity:0，表现为「能打字但看不见字」。 */
+.choice input[type="radio"] {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.choice:hover {
+	border-color: var(--color-border-strong);
+	color: var(--color-ink);
+}
+
+.choice:has(input:focus-visible) {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+}
+
+.choice:has(input:checked) {
+	border-color: var(--color-accent);
+	color: var(--color-accent);
+	background: color-mix(in oklab, var(--color-accent) 7%, var(--color-surface));
+}
+
+/* 自定义势力：与其它药丸同尺寸的空白框，点进去直接打字。
+ * 刻意不写占位文字 —— 保持与其他按钮同构的"空格子"观感。 */
+.choice--custom {
+	/* 固定宽度：input 的 width:100% 与「父容器宽度由内容撑开」会互相顶，
+	 * 不给死宽度的话这个框会独自占满一整行。48px 与其它药丸齐宽。 */
+	width: 48px;
+	min-width: 48px;
+	padding: 0;
+	cursor: text;
+}
+
+.choice__input {
+	width: 100%;
+	height: 100%;
+	min-height: 44px;
+	border: 0;
+	background: transparent;
+	text-align: center;
+	font-family: var(--font-body);
+	font-size: var(--text-base);
+	color: inherit;
+	padding: 0;
+	outline: none;
+}
+
+.choice--custom:focus-within,
+.choice--custom.is-active {
+	border-color: var(--color-accent);
+	color: var(--color-accent);
+	background: color-mix(in oklab, var(--color-accent) 7%, var(--color-surface));
+}
+
+/* ── 官方包选择区（当模板用）────────────────────────────────────────────
+ * 两级下拉 + 一个搜索框：包 → 武将。官方武将只读，选中后照常回填表单。 */
+.official {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+
+.official__row {
+	display: flex;
+	gap: var(--space-2);
+	align-items: center;
+}
+
+.official__row .field__input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* ── 按钮 ────────────────────────────────────────────────────────────── */
+/* 动作行：主按钮吃掉剩余宽度，清空保持自身宽度贴右边缘 ——
+ * 不然右边空出一大条，而「清空」孤零零悬在中间，看不出归属。 */
+.form__actions {
+	display: flex;
+	align-items: stretch;
+	gap: var(--space-3);
+	padding-top: var(--space-2);
+}
+
+.form__actions > .btn--primary {
+	flex: 1 1 auto;
+}
+
+.form__actions > .btn--ghost {
+	flex: 0 0 auto;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	min-height: 48px;
+	padding: 0 var(--space-4);
+	border-radius: var(--radius-md);
+	border: 1px solid transparent;
+	font-size: var(--text-base);
+	font-weight: 500;
+	cursor: pointer;
+	/* 按钮里绝不换行：容器一窄就断成「提交给 AI 对 / 话」很难看。
+	 * 放不下宁可整排换行，也不要从词中间断开。 */
+	white-space: nowrap;
+	transition:
+		background var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out),
+		color var(--dur-fast) var(--ease-out),
+		transform var(--dur-fast) var(--ease-out);
+}
+
+.btn--primary {
+	background: var(--color-accent);
+	color: var(--color-on-accent);
+}
+
+.btn--primary:hover {
+	background: var(--color-accent-deep);
+}
+
+.btn--primary:active {
+	transform: translateY(1px);
+}
+
+.btn--ghost {
+	background: transparent;
+	border-color: var(--color-border);
+	color: var(--color-muted);
+}
+
+.btn--ghost:hover {
+	border-color: var(--color-border-strong);
+	color: var(--color-ink);
+}
+
+.btn__mark {
+	font-family: var(--font-mono);
+	transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.btn--primary:hover .btn__mark {
+	transform: translateX(3px);
+}
+
+.btn:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.btn:disabled:hover {
+	transform: none;
+}
+
+.form__status {
+	margin-top: var(--space-4);
+	padding-top: var(--space-3);
+	border-top: 1px dashed var(--color-border-strong);
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+}
+
+/* ── 卡面：立绘 + 竖排名号 + 技能 ────────────────────────────────────────
+ * 结构：角标行 / 立绘 / 名号 / 技能。立绘由右侧裁剪器实时同步。 */
+.stage {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-5);
+}
+
+/* 卡面下方的技能面板：与卡面同宽，让中栏自成一体，
+ * 左栏因此只剩「身份信息」，不再被技能卡拉得很长。 */
+.skills-panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--color-border);
+}
+
+.hero-card {
+	--card-ink: var(--group-qun);
+	margin: 0 auto;
+	width: min(340px, 100%);
+	padding: var(--space-4);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.5), transparent 40%),
+		var(--color-surface-sunken);
+}
+
+.hero-card[data-group="wei"] {
+	--card-ink: var(--group-wei);
+}
+
+.hero-card[data-group="shu"] {
+	--card-ink: var(--group-shu);
+}
+
+.hero-card[data-group="wu"] {
+	--card-ink: var(--group-wu);
+}
+
+.hero-card[data-group="qun"] {
+	--card-ink: var(--group-qun);
+}
+
+.hero-card[data-group="jin"] {
+	--card-ink: var(--group-jin);
+}
+
+.hero-card[data-group="shen"] {
+	--card-ink: var(--group-shen);
+}
+
+/* 自定义势力：用墨色。
+ * 原来给的是 --group-none（#8a8278 浅灰）—— 浅灰底配白字几乎没有对比，
+ * 左上角标和技能名都显得「灰白发飘」，正是要换掉的那两处。 */
+.hero-card[data-group="custom"] {
+	--card-ink: var(--color-ink);
+}
+
+.hero-card__inner {
+	position: relative;
+	aspect-ratio: 350 / 464;
+	background: var(--color-surface);
+	border: 1px solid var(--color-accent);
+	border-radius: var(--radius-sm);
+	box-shadow:
+		inset 0 0 0 4px var(--color-surface),
+		inset 0 0 0 5px var(--color-border),
+		var(--shadow-1);
+	overflow: hidden;
+}
+
+/* 立绘层：铺满卡面（350:464 与头像规格同比例，几乎不发生二次裁切）。
+ * 空态时露出纸底与提示。 */
+.hero-card__art {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	background: var(--color-surface-sunken) center / cover no-repeat;
+}
+
+/* 立绘画布：铺满立绘层。像素尺寸由 JS 按「显示尺寸 × devicePixelRatio」设定，
+ * 所以这里只负责把它拉满，不参与分辨率决定。 */
+.hero-card__art-canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+.hero-card__art-empty {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-content: center;
+	text-align: center;
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	line-height: 1.9;
+}
+
+.hero-card__art-empty span {
+	font-size: var(--text-xs);
+}
+
+.hero-card.has-art .hero-card__art-empty {
+	display: none;
+}
+
+/* 立绘出现后压一层极淡的暖色，让白纸与照片在同一色温里 */
+.hero-card.has-art .hero-card__art::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(180deg, rgba(246, 242, 233, 0.06), rgba(27, 25, 22, 0.16));
+}
+
+/* 势力角标：叠在立绘左上 */
+.hero-card__group {
+	position: absolute;
+	top: var(--space-3);
+	left: var(--space-3);
+	z-index: 2;
+	/* 宽高自适应：势力名可以自定义、且已不限制字数，
+	 * 固定 42x42 会把长名字挤出方块外面。最小保持 42px，最多约四个字宽。 */
+	min-width: 42px;
+	min-height: 42px;
+	max-width: 104px;
+	padding: 6px 8px;
+	display: grid;
+	place-items: center;
+	font-family: var(--font-display);
+	font-size: var(--text-lg);
+	line-height: 1.1;
+	text-align: center;
+	word-break: break-word;
+	color: var(--color-on-accent);
+	/* 半透明 + 背景模糊：角标像浮在立绘上，而不是贴了一块实心色块。
+	 * 透明度按反馈又往下压了一档（84% → 68%），靠 backdrop-filter 保住白字可读性。 */
+	background: color-mix(in oklab, var(--card-ink) 68%, transparent);
+	backdrop-filter: blur(3px);
+	-webkit-backdrop-filter: blur(3px);
+	border-radius: var(--radius-sm);
+	box-shadow: 0 2px 10px rgba(20, 18, 15, 0.22);
+	transition: background var(--dur-base) var(--ease-out);
+}
+
+/* 体力：朱砂勾玉 + 白色描边。
+ * 刻意不加暗色底衬 —— 描边已经能在深色与浅色立绘上都保证可见，
+ * 加底衬会把立绘切出一块黑斑，破坏画面。 */
+.hero-card__pips {
+	position: absolute;
+	top: var(--space-3);
+	right: var(--space-3);
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.pip {
+	width: 9px;
+	height: 9px;
+	border-radius: var(--radius-pill);
+	background: var(--color-accent);
+	box-shadow:
+		0 0 0 1.5px rgba(255, 250, 245, 0.92),
+		0 1px 3px rgba(20, 18, 15, 0.4);
+}
+
+/* 体力超过 10 点时勾玉排不下（卡面横向放不开），改为「一勾玉 + ×N」。
+ * 数字用白色加暗描边，同样不依赖底色。 */
+.pip-count {
+	margin-left: 3px;
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	color: #fbf9f4;
+	text-shadow:
+		0 1px 3px rgba(20, 18, 15, 0.65),
+		0 0 10px rgba(20, 18, 15, 0.35);
+}
+
+/* 竖排名号：叠在立绘右侧（官方卡牌的识别性布局） */
+.hero-card__column {
+	position: absolute;
+	top: 76px;
+	bottom: 132px;
+	right: var(--space-3);
+	z-index: 2;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: var(--space-3);
+	writing-mode: vertical-rl;
+	text-orientation: upright;
+	pointer-events: none;
+}
+
+.hero-card__title {
+	font-size: var(--text-sm);
+	letter-spacing: 0.2em;
+	color: rgba(246, 242, 233, 0.82);
+	text-shadow: 0 1px 6px rgba(20, 18, 15, 0.6);
+}
+
+.hero-card__name {
+	font-family: var(--font-display);
+	font-size: var(--text-2xl);
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	color: #fbf9f4;
+	line-height: 1;
+	text-shadow:
+		0 1px 3px rgba(20, 18, 15, 0.7),
+		0 0 18px rgba(20, 18, 15, 0.45);
+}
+
+/* 技能区：叠在底部，用纸色渐隐保证文字可读。
+ * 支持多条技能依次排列；条数多时收一档字号，并限制最大高度，
+ * 避免技能把立绘挤到看不见。 */
+.hero-card__skills {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-6) var(--space-3) var(--space-3);
+	background: linear-gradient(180deg, transparent, rgba(251, 249, 244, 0.94) 38%);
+	max-height: 62%;
+	/* 技能多时在卡面内滚动查看，不必为了看全而把立绘挤没。
+	 * overscroll-behavior 防止滚到底之后把整页带着一起滚。 */
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(27, 25, 22, 0.3) transparent;
+}
+
+.hero-card__skills::-webkit-scrollbar {
+	width: 4px;
+}
+
+.hero-card__skills::-webkit-scrollbar-thumb {
+	background: rgba(27, 25, 22, 0.28);
+	border-radius: 2px;
+}
+
+.hero-card__skills::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.hero-card__skills.is-crowded .hero-card__skill-name {
+	font-size: var(--text-base);
+}
+
+.hero-card__skills.is-crowded .hero-card__skill-desc {
+	font-size: 10px;
+	line-height: 1.6;
+}
+
+.hero-card__skill + .hero-card__skill {
+	padding-top: var(--space-2);
+	border-top: 1px dashed var(--color-border);
+}
+
+.hero-card__skill-name {
+	display: inline-block;
+	font-family: var(--font-display);
+	font-size: var(--text-lg);
+	font-weight: 600;
+	color: var(--card-ink);
+	letter-spacing: 0.06em;
+}
+
+.hero-card__skill-desc {
+	margin-top: var(--space-1);
+	font-size: var(--text-xs);
+	line-height: 1.7;
+	color: var(--color-muted);
+	max-width: none;
+}
+
+/* ── 立绘裁剪 ────────────────────────────────────────────────────────── */
+.crop-col {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.cropper {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+}
+
+.cropper__viewport {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 350 / 464;
+	overflow: hidden;
+	background: var(--color-surface-sunken);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	cursor: grab;
+	touch-action: none;
+}
+
+.cropper__viewport.is-dragging {
+	cursor: grabbing;
+}
+
+.cropper__viewport.is-dragover {
+	border-color: var(--color-accent);
+	background: color-mix(in oklab, var(--color-accent) 6%, var(--color-surface-sunken));
+}
+
+.cropper__image {
+	position: absolute;
+	top: 0;
+	left: 0;
+	max-width: none;
+	transform-origin: 0 0;
+	user-select: none;
+	-webkit-user-drag: none;
+	pointer-events: none;
+}
+
+.cropper__empty {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-content: center;
+	text-align: center;
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	line-height: 1.9;
+	padding: var(--space-4);
+}
+
+.cropper__empty span {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+/* [hidden] 的 display:none 会被上面的 display:grid 覆盖，必须显式声明，
+ * 否则图片载入后空态提示仍然叠在图上。 */
+.cropper__empty[hidden],
+.hero-card__art-empty[hidden] {
+	display: none;
+}
+
+.cropper__grid {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity var(--dur-base) var(--ease-out);
+	background-image:
+		linear-gradient(to right, transparent calc(33.333% - 0.5px), rgba(246, 242, 233, 0.42) 33.333%, transparent calc(33.333% + 0.5px)),
+		linear-gradient(to right, transparent calc(66.666% - 0.5px), rgba(246, 242, 233, 0.42) 66.666%, transparent calc(66.666% + 0.5px)),
+		linear-gradient(to bottom, transparent calc(33.333% - 0.5px), rgba(246, 242, 233, 0.42) 33.333%, transparent calc(33.333% + 0.5px)),
+		linear-gradient(to bottom, transparent calc(66.666% - 0.5px), rgba(246, 242, 233, 0.42) 66.666%, transparent calc(66.666% + 0.5px));
+}
+
+.cropper.has-image .cropper__grid {
+	opacity: 1;
+}
+
+.cropper__edge {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity var(--dur-base) var(--ease-out);
+	background:
+		linear-gradient(var(--color-accent), var(--color-accent)) left top / 14px 2px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) left top / 2px 14px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) right top / 14px 2px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) right top / 2px 14px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) left bottom / 14px 2px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) left bottom / 2px 14px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) right bottom / 14px 2px no-repeat,
+		linear-gradient(var(--color-accent), var(--color-accent)) right bottom / 2px 14px no-repeat;
+}
+
+.cropper.has-image .cropper__edge {
+	opacity: 1;
+}
+
+.cropper__panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	align-items: stretch;
+}
+
+.cropper__control {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+}
+
+.cropper__control-label {
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	white-space: nowrap;
+}
+
+.cropper__range {
+	flex: 1;
+	min-width: 0;
+	accent-color: var(--color-accent);
+	height: 24px;
+}
+
+.cropper__range:disabled {
+	opacity: 0.45;
+}
+
+.cropper__spec {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	line-height: 1.8;
+}
+
+.cropper__spec code {
+	font-family: var(--font-mono);
+	color: var(--color-muted);
+}
+
+.cropper__hint {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+	line-height: 1.8;
+}
+
+/* ── 版权行 ──────────────────────────────────────────────────────────── */
+.colophon {
+	margin-top: var(--space-7);
+}
+
+.colophon__line {
+	padding-top: var(--space-4);
+	font-size: var(--text-sm);
+	color: var(--color-muted);
+	max-width: none;
+}
+
+/* ── 响应式 ──────────────────────────────────────────────────────────── */
+@media (max-width: 1240px) {
+	.workshop {
+		grid-template-columns: var(--rail-width) minmax(0, 1fr);
+	}
+
+	/* 立绘栏落到第二行，与卡面并排 */
+	.crop-col {
+		grid-column: 2;
+		grid-row: 2;
+	}
+}
+
+@media (max-width: 980px) {
+	.page {
+		padding: var(--space-5) var(--space-4) var(--space-6);
+	}
+
+	.workshop {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.crop-col {
+		grid-column: auto;
+		grid-row: auto;
+	}
+
+	.masthead__row {
+		flex-direction: column;
+	}
+
+	.masthead__meta {
+		text-align: left;
+	}
+
+	.cropper__viewport {
+		width: min(320px, 100%);
+		margin: 0 auto;
+	}
+}
+
+
+@media (max-width: 560px) {
+	.field-row {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* 第四步的列数随宽度退档：
+ *  ≥1241        三列（按编号分：其一其二 ｜ 其三 ｜ 其四其五其六）
+ *  1240 ~ 721   两列
+ *  ≤720         单列
+ * 720 这个坎沿用旧值：预览面板 ~800px 时仍要保持多列。
+ *
+ * 退档时把「列壳」抽掉（display: contents），六个小节直接当网格项按文档序
+ * 自动排。文档序现在就是编号序（其一…其六），所以：
+ *  两列 → 左到右、上到下正好 其一其二 / 其三其四 / 其五其六，不留空格；
+ *  单列 → 天然就是 其一…其六，不必再补 order。
+ * 分隔线也不用另管：.more-block + .more-block 只看相邻兄弟，
+ * DOM 里排第一的「其一」天然没有前缀细线。 */
+@media (max-width: 1240px) {
+	.more-grid {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	}
+
+	.more-col {
+		display: contents;
+	}
+
+	/* 窄屏两列是「行优先」，细线在这里必然出问题：它带 margin-top + padding-top，
+	 * 落在「每行首块」上就把那一块连同整行往下推，跟同行的另一块错位
+	 * （实测 其三 top 647 / 其四 top 583）；落在「每对第二块」上则反过来错位。
+	 * 好在分节本来就不只靠线 —— 这套版式的原则是「留白承担结构」，
+	 * 所以窄屏直接去掉线，由 .more-grid 的 row-gap（64px）承担行间距。 */
+	.more-block + .more-block {
+		margin-top: 0;
+		padding-top: 0;
+		border-top: 0;
+	}
+}
+
+@media (max-width: 720px) {
+	.more-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* 一列：六节上下叠着，细线回到「相邻就加」（除其一外都加） */
+	.more-block + .more-block {
+		margin-top: var(--space-7);
+		padding-top: var(--space-6);
+		border-top: 1px solid var(--color-border);
+	}
+}
+/* ── 扩展目标：三种模式用的是同一个「框」 ─────────────────────────────
+ * 新建扩展 —— 框里填扩展名
+ * 加入已有 —— 同一个框，右侧多一个「选择 zip」按钮
+ * 修改已有 —— 整个框可点，展开「文件夹 / 压缩包」
+ * 三者外形一致，只有交互不同。 */
+.field__control {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.field__control .field__input {
+	padding-right: 96px;
+}
+
+.field__inline-btn {
+	position: absolute;
+	right: 6px;
+	top: 50%;
+	transform: translateY(-50%);
+	height: 36px;
+	padding: 0 10px;
+	font: inherit;
+	font-size: var(--text-sm);
+	color: var(--color-accent);
+	background: transparent;
+	border: 0;
+	border-left: 1px solid var(--color-border);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.field__inline-btn:hover {
+	color: var(--color-accent-deep);
+}
+
+.field--nested .field__input {
+	width: 100%;
+	height: 48px;
+	padding-block: 0;
+}
+
+/* 「选择扩展包」长得就是一个输入框，只是点它会展开菜单 */
+.picker__summary {
+	display: flex;
+	align-items: center;
+	color: var(--color-muted);
+	cursor: pointer;
+}
+
+.picker {
+	position: relative;
+}
+
+.picker > summary {
+	list-style: none;
+}
+
+.picker > summary::-webkit-details-marker {
+	display: none;
+}
+
+.picker[open] > summary {
+	border-color: var(--color-accent);
+	color: var(--color-accent);
+}
+
+.picker__menu {
+	position: absolute;
+	z-index: 30;
+	left: 0;
+	right: 0;
+	margin-top: 4px;
+	padding: 4px;
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	box-shadow: 0 10px 28px rgba(27, 25, 22, 0.14);
+}
+
+.picker__item {
+	display: block;
+	width: 100%;
+	min-height: 44px;
+	/* 上下留白而不是 padding: 0 —— 菜单项文字可能较长会折行，
+	 * 折行后没有上下留白会很挤 */
+	padding: 10px var(--space-3);
+	line-height: 1.5;
+	text-align: left;
+	font: inherit;
+	font-size: var(--text-base);
+	color: var(--color-ink);
+	background: transparent;
+	border: 0;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+}
+
+.picker__item:hover {
+	background: var(--color-surface-sunken);
+}
+
+/* ============================================================================
+ * 卡面识别（默认收起，点标题行的「识别卡面」才展开）
+ * 位置在 <form> 之外、composer 之内 —— 免得被表单的回车拦截与 reset 逻辑波及。
+ * 默认收起：工作台是「四周填、中间看」，这块不该杵在表单最上面打断填充流。
+ * ==========================================================================*/
+
+.import-box {
+	margin-bottom: var(--space-5);
+	padding: var(--space-3) var(--space-4) var(--space-4);
+	border: 1px dashed var(--color-border-strong);
+	border-radius: var(--radius-md);
+	background: var(--color-surface-sunken);
+}
+
+.import-box__head {
+	margin-bottom: var(--space-3);
+}
+
+.import-box__title {
+	margin: 0;
+	font-family: var(--font-display);
+	font-size: var(--text-base);
+	font-weight: 500;
+	color: var(--color-ink);
+}
+
+.import-box__hint {
+	margin: var(--space-1) 0 0;
+	font-size: var(--text-xs);
+	line-height: var(--leading-snug);
+	color: var(--color-muted);
+}
+
+.import-box__slots {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-2);
+}
+
+.import-slot {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-height: 64px;
+	padding: var(--space-2) var(--space-3);
+	padding-right: 58px;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface);
+	overflow: hidden;
+	cursor: pointer;
+	transition:
+		border-color var(--dur-fast) var(--ease-out),
+		background-color var(--dur-fast) var(--ease-out);
+}
+
+/* 拖拽悬停：告诉用户「松手就落在这里」 */
+.import-slot.is-dragover {
+	border-color: var(--color-accent, #4a7dbd);
+	background: color-mix(in srgb, var(--color-accent, #4a7dbd) 8%, var(--color-surface));
+}
+
+.import-slot:hover {
+	border-color: var(--color-border-strong);
+}
+
+.import-slot:focus-within {
+	border-color: var(--color-accent);
+}
+
+.import-slot.is-filled {
+	border-color: var(--color-border-strong);
+}
+
+.import-slot__label {
+	font-size: var(--text-xs);
+	color: var(--color-muted);
+}
+
+.import-slot__opt {
+	margin-left: var(--space-1);
+	font-style: normal;
+	color: var(--color-muted);
+}
+
+.import-slot__name {
+	font-size: var(--text-sm);
+	color: var(--color-ink);
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.import-slot__thumb {
+	position: absolute;
+	top: 50%;
+	right: var(--space-2);
+	width: 40px;
+	height: 56px;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-sm);
+	object-fit: cover;
+	transform: translateY(-50%);
+}
+
+.import-box__foot {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin-top: var(--space-3);
+}
+
+.import-box__status {
+	font-size: var(--text-xs);
+	line-height: var(--leading-snug);
+	color: var(--color-muted);
+}
+
+.import-box__status:empty {
+	display: none;
+}
+
+/* 栏目标题行右侧的操作入口（目前只有「识别卡面」）。
+ * 这个入口容易被忽略 —— 做成带边框的小按钮，前面配一个朱砂色的小卡面图标：
+ * 不跟栏目标题抢视线，但一眼能看见。 */
+.section-head__tools {
+	display: flex;
+	align-items: center;
+	align-self: center;
+	gap: var(--space-3);
+}
+
+.section-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 1px var(--space-2);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface);
+	font-family: var(--font-body);
+	font-size: var(--text-xs);
+	line-height: 1.35;
+	color: var(--color-ink);
+	cursor: pointer;
+	transition:
+		color var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out),
+		background-color var(--dur-fast) var(--ease-out);
+}
+
+/* 图标：一张小卡面的轮廓（外框 + 两行内容），纯 CSS 画，不引图标库 */
+.section-action::before {
+	content: "";
+	width: 9px;
+	height: 11px;
+	border: 1px solid var(--color-accent);
+	border-radius: 2px;
+	background-image:
+		linear-gradient(var(--color-accent), var(--color-accent)),
+		linear-gradient(var(--color-accent), var(--color-accent));
+	background-size:
+		5px 1px,
+		5px 1px;
+	background-position:
+		1px 4px,
+		1px 7px;
+	background-repeat: no-repeat;
+}
+
+.section-action:hover,
+.section-action:focus-visible {
+	border-color: var(--color-accent);
+	background: var(--color-bg);
+	color: var(--color-accent-deep);
+	outline: none;
+}
+
+.section-action[aria-expanded="true"] {
+	border-color: var(--color-accent);
+	color: var(--color-accent-deep);
+}
+
+/* 面板展开后与下方表单之间留一口气 */
+.import-box:not([hidden]) {
+	animation: import-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes import-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+/* 第四步中列末尾的「返回」：填完滚回上面的工作台。
+ * 占满这一列、比普通按钮大一号 —— 它是这一屏的收尾动作，要一眼看到。 */
+.more-foot {
+	/* 贴到列底：三列等高后，右列内容通常最短，
+	 * auto 会把「返回」推到与另外两列的底边齐平 ——
+	 * 否则中间列的技能框会超出返回按钮十几个像素，看起来没对齐。 */
+	margin-top: auto;
+	padding-top: var(--space-4);
+}
+
+.btn--back {
+	width: 100%;
+	min-height: 56px;
+	font-size: var(--text-lg);
+}

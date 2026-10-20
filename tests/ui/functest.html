@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>工坊功能测试</title>
+<style>
+	html, body { margin: 0; padding: 0; }
+	iframe { display: block; width: 1440px; height: 2600px; border: 0; }
+	#log { position: fixed; top: 0; left: 0; z-index: 9; margin: 0; padding: 8px 10px;
+		max-height: 100vh; overflow: auto;
+		background: #fffbe8; border-bottom: 2px solid #c33;
+		font: 12px/1.55 monospace; color: #111; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<pre id="log">运行中…</pre>
+<iframe id="fr" src="/"></iframe>
+<script>
+/* ==========================================================================
+ * 真机功能测试：在真实浏览器里驱动真实页面，逐条断言。
+ * 结果写进**外层**文档（dump-dom 只给主 frame，写 iframe 里读不到）。
+ * ========================================================================*/
+var fr = document.getElementById("fr");
+var out = [];
+var pass = 0, fail = 0;
+/* 开跑前问一次：工作区里是否已有别人的提交（决定真实提交用例跑不跑） */
+var hasSubmitAtStart = false;
+var d, w;
+
+function log(s) { out.push(s); document.getElementById("log").textContent = out.join("\n"); }
+function ok(name, detail) { pass++; log("  [通过] " + name + (detail ? "  — " + detail : "")); }
+function bad(name, detail) { fail++; log("  [失败] " + name + (detail ? "  — " + detail : "")); }
+function check(name, cond, detail) { cond ? ok(name, detail) : bad(name, detail || ""); }
+function section(t) { log("\n== " + t + " =="); }
+
+var d, w;
+function q(sel) { return d.querySelector(sel); }
+function qa(sel) { return Array.prototype.slice.call(d.querySelectorAll(sel)); }
+function id(x) { return d.getElementById(x); }
+function fire(el, type) {
+	el.dispatchEvent(new w.Event(type, { bubbles: true, cancelable: true }));
+}
+function setVal(el, v) { el.value = v; fire(el, "input"); fire(el, "change"); }
+function click(el) { el.click(); }
+function tick(ms) { return new Promise(function (r) { setTimeout(r, ms || 0); }); }
+/* 等一个条件成立 —— 最多 tries*step 毫秒。图片解码、FileReader 都是异步的，
+ * 机器忙时固定 tick 会等不够（实测过：立绘在服务端刚重启那轮没赶上）。 */
+async function waitFor(cond, tries, step) {
+	tries = tries || 40; step = step || 100;
+	for (var i = 0; i < tries; i++) {
+		if (cond()) return true;
+		await tick(step);
+	}
+	return cond();
+}
+function status() { var e = id("form-status"); return e ? e.textContent.replace(/\s+/g, " ").trim() : ""; }
+
+/* 造一个真实可解码的 PNG File（canvas → blob） */
+async function makeImageFile(name, ww, hh) {
+	var cv = document.createElement("canvas");
+	cv.width = ww; cv.height = hh;
+	var ctx = cv.getContext("2d");
+	ctx.fillStyle = "#3a6ea5"; ctx.fillRect(0, 0, ww, hh);
+	ctx.fillStyle = "#ffd166"; ctx.fillRect(ww * 0.25, hh * 0.25, ww * 0.5, hh * 0.5);
+	var blob = await new Promise(function (r) { cv.toBlob(r, "image/png"); });
+	return new w.File([blob], name, { type: "image/png" });
+}
+
+/* 造一个「声音」文件：只验流程，不要求真能解码 */
+function makeAudioFile(name, bytes, type) {
+	var u8 = new Uint8Array(bytes || 64);
+	for (var i = 0; i < u8.length; i++) u8[i] = (i * 37) % 251;
+	return new w.File([u8], name, { type: type || "audio/mpeg" });
+}
+
+function setFiles(input, files) {
+	var dt = new w.DataTransfer();
+	files.forEach(function (f) { dt.items.add(f); });
+	input.files = dt.files;
+	fire(input, "change");
+}
+
+/* ── 拦截 iframe 里的 fetch，用来断言「客户端到底发了什么」 ───────────── */
+var sent = [];
+var origFetch = null;
+function installFetchSpy() {
+	if (!origFetch) origFetch = w.fetch;
+	sent = [];
+	w.fetch = function (url, init) {
+		sent.push({ url: String(url), body: init && init.body ? String(init.body) : "" });
+		return Promise.resolve({
+			ok: true, status: 200,
+			json: function () { return Promise.resolve({ ok: true, path: "/tmp/fake/latest-request.json" }); },
+		});
+	};
+}
+function restoreFetch() {
+	if (origFetch) w.fetch = origFetch;
+}
+function lastJson() {
+	for (var i = sent.length - 1; i >= 0; i--) {
+		try { return { url: sent[i].url, data: JSON.parse(sent[i].body) }; } catch (e) { /* 非 JSON */ }
+	}
+	return null;
+}
+function sentTo(pattern) {
+	return sent.filter(function (s) { return s.url.indexOf(pattern) >= 0; });
+}
+
+/* ── 便捷操作 ─────────────────────────────────────────────────────────── */
+function skillItems() { return qa("#skill-list .skill-item"); }
+function openCount() { return qa('#skill-list .skill-item[data-open="true"]').length; }
+function moreBlocks() { return qa("#more-skills .more-skill"); }
+function skins() { return qa("#skin-list .skin-chip"); }
+function skinPicker() { return d.querySelector('body > input[type="file"][accept="image/*"]'); }
+function audioInputOf(idx) {
+	var blk = moreBlocks()[idx];
+	return blk ? blk.querySelector('.skill-audio input[type="file"]') : null;
+}
+function flagBoxesOf(idx) {
+	var blk = moreBlocks()[idx];
+	return blk ? Array.prototype.slice.call(blk.querySelectorAll(".skill-flags input")) : [];
+}
+function checkedFlags(idx) {
+	return flagBoxesOf(idx).filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+}
+function resetAll() { var f = id("hero-form"); f.reset(); return tick(200); }
+function pickRadio(name, value) {
+	var r = d.querySelector('input[name="' + name + '"][value="' + value + '"]');
+	if (r) { r.checked = true; fire(r, "change"); }
+	return r;
+}
+
+/* ── 测试清单 ─────────────────────────────────────────────────────────── */
+var FIXTURE = {"extension.js": "import { lib, game, ui, get, ai, _status } from \"../../noname.js\";\nimport { packs } from \"./character/character.js\";\n\nexport const type = \"extension\";\n\nexport default function () {\n\treturn {\n\t\tname: \"testgood\",\n\t\tconnect: true,\n\t\tcontent(config, pack) {},\n\t\tconfig: {},\n\t\thelp: {},\n\t\tpackage: {\n\t\t\t...packs,\n\t\t\tauthor: \"test\",\n\t\t\tintro: \"测试用最小扩展\",\n\t\t\tversion: \"1.0\",\n\t\t},\n\t};\n}\n", "info.json": "{\n\t\"name\": \"testgood\",\n\t\"intro\": \"测试用最小扩展\",\n\t\"author\": \"test\",\n\t\"diskURL\": \"\",\n\t\"forumURL\": \"\",\n\t\"version\": \"1.0\"\n}\n", "character/character.js": "const characters = {\n\ttg_hero: {\n\t\tsex: \"male\",\n\t\tgroup: \"wei\",\n\t\thp: 4,\n\t\tskills: [\"tg_skill\"],\n\t},\n};\n\nconst skills = {\n\ttg_skill: {\n\t\ttrigger: { player: \"damageAfter\" },\n\t\tforced: true,\n\t\tlocked: true,\n\t\tasync content(event, trigger, player) {\n\t\t\tawait player.draw();\n\t\t},\n\t},\n};\n\nconst translates = {\n\ttg_hero: \"测试武将\",\n\ttg_skill: \"测试技\",\n\t\"tg_skill_info\": \"锁定技，你受到伤害后，摸一张牌。\",\n\t\"#tg_skill1\": \"摸牌只是顺手。\",\n\t\"#tg_skill2\": \"再来一张，如何？\",\n\t\"#tg_hero1:die\": \"这一局，算我输。\",\n};\n\nconst characterTitles = {\n\ttg_hero: \"试作型\",\n};\n\nconst characterSort = {\n\ttestgood: {\n\t\ttg_pack: [\"tg_hero\"],\n\t},\n};\n\nconst characterSortTranslate = {\n\ttg_pack: \"测试包\",\n};\n\nexport const packs = {\n\tcharacter: {\n\t\tconnect: true,\n\t\tcharacter: characters,\n\t\tcharacterSort,\n\t\tcharacterTitle: characterTitles,\n\t\ttranslate: {\n\t\t\t...translates,\n\t\t\t...characterSortTranslate,\n\t\t\ttestgood: \"测试扩展\",\n\t\t},\n\t},\n\tskill: {\n\t\tskill: skills,\n\t\ttranslate: translates,\n\t},\n};\n"};
+var ZIP_B64 = "UEsDBBQAAAgIAAacS10l8HlNAwEAAIgBAAAcAAAA5LiK5Lyg5rWL6K+V5YyFL2V4dGVuc2lvbi5qc01PQU7DMBA8J69Y5VQky4VrKt6CjLtJDIkd2WtUVEXiijhwoTceACfgwJMaeAbrNBWVLHl2dnZm13S98wRbaM21gFp1KCAaRkgCFIOrQIpigAEq7zoopFzys86yVN6EYpWbo0Wv9O2JcKkb5ZUm9P/oMJHjZhrRzgYCuu8RLqHADaENxtkTxRorFVuCKlpN3ILFGWzzzCNFbxPK0h4lFISBaufWhWCOfS1qKoF8xJlgb1rwX5laTJuy0TD3mCvnqsG2P+KkUjW7p5xMSjkdmDqZitQ4P+dOmZmx5B0z4/fT78fu5+VtfH3Yfz6Pj+/7r91Bcoc+3ceiC3k+USlnWOVD/gdQSwMEFAAACAgABpxLXcenmLNlAAAAggAAABkAAADkuIrkvKDmtYvor5XljIUvaW5mby5qc29uq+biVMpLzE1VslJQKkktLknPz09R0gEKZuaVFOWDRJ9t7X6xfurzKSuezWl4uqH/WefKpxungpUklpZk5BfBdIKFUjKLs0ODfEBiYH5aflFpLrJAWWpRcWZ+HohvqGegxFXLBQBQSwMEFAAACAgABpxLXQzLvD8FAgAABwQAACYAAADkuIrkvKDmtYvor5XljIUvY2hhcmFjdGVyL2NoYXJhY3Rlci5qc21Ty2rbQBRdy18xqJsEhCGlK4Uu+g3JLhQzSGNZWNGY0aROKAY30BDXbtPQmrSljwTaQAtxEkohFLv9mGoUZ5Vf6J2HJT+yEXMfc865R3c8GicceTXMsMcJS9BD9LRk8aBSI4y68mwlZNtF9iaOiO1AGDC61YBEk4QqrkHwQB6SehhFiYs2bLiuAvsx5FtOqbVaKnmKSPfkJCrULJyFQUAYBKgR4R15sn28iQPyqArCbNSSHFXKPOK7iLMtIuOIevXpGCc7sYeAi5OYL5En8HWQgXYM8LLis3ATh9ykyj7DzaXlVci35iVzhuMkwpzMe2Nnv7rj8352diou9qQVxUCT0ou2zOd+VMK4Sm0o37x9JgYfoHw77KWjY3FwJPYv0uFXMfgpXr+CZHZ4lV61xfD4utP7195VKPcmMCsSAjqgJg5+ZO/Ob05+Z53uQt992Sf2XmafvmkwABanu+mofzv8krfKYVZcPySye/z3vWy9lMKuB0fZ/uH4zxsNXDiSb8t6yKNFW2DwdPRRfO7efWmNMm6ukIQHlPpmAYJKA3t1sz8Sa3F9ZkDWJz8mF6DvG/NF77kRQLYbklNDyB4jOUfTAqAeE48XyzRVLx7ITEHKmEkoR9x5hxy130atJrPK5XKxWY7J3D2fqhZmTZar811c9tUTNDtrTT0nc9TvbY5/hlf7+x9QSwECFAMUAAAICAAGnEtdJfB5TQMBAACIAQAAHAAAAAAAAAAAAAAAgAEAAAAA5LiK5Lyg5rWL6K+V5YyFL2V4dGVuc2lvbi5qc1BLAQIUAxQAAAgIAAacS13Hp5izZQAAAIIAAAAZAAAAAAAAAAAAAACAAT0BAADkuIrkvKDmtYvor5XljIUvaW5mby5qc29uUEsBAhQDFAAACAgABpxLXQzLvD8FAgAABwQAACYAAAAAAAAAAAAAAIAB2QEAAOS4iuS8oOa1i+ivleWMhS9jaGFyYWN0ZXIvY2hhcmFjdGVyLmpzUEsFBgAAAAADAAMA5QAAACIEAAAAAA==";
+var cases = [];
+function T(name, fn) { cases.push({ name: name, fn: fn }); }
+
+T("1.1 服务端健康检查可达", async function () {
+	var r = await fetch("/api/health");
+	var j = await r.json();
+	check("health ok", j.ok === true);
+	check("工作区已探到", !!j.workspace, j.workspace);
+});
+
+T("1.2 初始技能卡：两张且都展开", async function () {
+	check("卡数 = 2", skillItems().length === 2, "实为 " + skillItems().length);
+	check("都展开", openCount() === 2, "展开 " + openCount() + " 张");
+});
+
+T("1.3 卡面默认内容正确", async function () {
+	check("武将名 = 灰猫", id("card-name").textContent.trim() === "灰猫", id("card-name").textContent);
+	check("称号 = 混世喵王", id("card-title").textContent.trim() === "混世喵王", id("card-title").textContent);
+	/* 卡面势力必须与表单里默认选中的那个 radio 一致（不能各写各的） */
+	var chosen = d.querySelector('input[name="group"]:checked');
+	var expect = chosen ? chosen.value : "";
+	var CN = { wei: "魏", shu: "蜀", wu: "吴", qun: "群", jin: "晋", shen: "神" };
+	check("卡面势力与默认选中项一致", id("card-group").textContent.trim() === CN[expect],
+		"表单选 " + expect + "，卡面显示 " + id("card-group").textContent.trim());
+	check("卡面 data-group 与默认一致", id("hero-card").getAttribute("data-group") === expect,
+		"表单 " + expect + " / data-group " + id("hero-card").getAttribute("data-group"));
+	var pips = id("card-pips").querySelectorAll(".pip, .pip-group, span").length;
+	check("体力勾玉已渲染", pips > 0, "勾玉节点 " + pips + " 个");
+});
+
+T("1.4 更多拓展默认收起", async function () {
+	check("面板 hidden", id("more-panel").hasAttribute("hidden"));
+	click(id("more-toggle"));
+	await tick(30);
+	check("点击后展开", !id("more-panel").hasAttribute("hidden"));
+	check("按钮文案变化", /收起/.test(id("more-toggle").textContent), id("more-toggle").textContent.trim());
+});
+
+T("1.5 皮肤空态占位存在", async function () {
+	check("皮肤列表为空", skins().length === 0);
+	var cs = w.getComputedStyle(id("skin-list"), "::before");
+	check("空态占位有内容", cs && cs.content && cs.content !== "none", cs ? cs.content : "n/a");
+});
+
+T("2.1 武将名同步到卡面", async function () {
+	setVal(id("f-name"), "测试喵");
+	await tick(10);
+	check("卡面跟着变", id("card-name").textContent.trim() === "测试喵", id("card-name").textContent);
+});
+
+T("2.2 称号同步到卡面", async function () {
+	setVal(id("f-title"), "喵中霸王");
+	await tick(10);
+	check("卡面跟着变", id("card-title").textContent.trim() === "喵中霸王", id("card-title").textContent);
+});
+
+T("2.3 势力切换（魏/神）", async function () {
+	pickRadio("group", "wei"); await tick(10);
+	check("势力字 = 魏", id("card-group").textContent.trim() === "魏", id("card-group").textContent);
+	check("卡面 data-group = wei", id("hero-card").getAttribute("data-group") === "wei");
+	pickRadio("group", "shen"); await tick(10);
+	check("势力字 = 神", id("card-group").textContent.trim() === "神", id("card-group").textContent);
+	pickRadio("group", "qun"); await tick(10);
+});
+
+T("2.4 自定义势力覆盖预设", async function () {
+	var box = q(".choice--custom");
+	var inp = box.querySelector(".choice__input");
+	click(inp); inp.value = "喵势力"; fire(inp, "input");
+	await tick(20);
+	check("卡面显示自定义势力", id("card-group").textContent.trim() === "喵势力", id("card-group").textContent);
+	var preset = d.querySelector('input[name="group"]:checked');
+	check("预设势力已取消选中", !preset, preset ? preset.value : "");
+	/* 还原 */
+	click(q('input[name="group"][value="qun"]'));
+	await tick(10);
+});
+
+T("2.5 体力 4/4/0 → 4 勾玉", async function () {
+	setVal(id("f-hp"), "4/4/0");
+	await tick(20);
+	check("输入被接受", id("f-hp").value === "4/4/0", id("f-hp").value);
+	var n = id("card-pips").children.length;
+	check("卡面 4 个勾玉", n === 4, "实为 " + n);
+});
+
+T("2.6 体力 12/12/0 → 单勾玉 ×12", async function () {
+	setVal(id("f-hp"), "12/12/0");
+	await tick(20);
+	check("被规整为 12/12/0", id("f-hp").value === "12/12/0", id("f-hp").value);
+	check("卡面用 ×N 写法", /12/.test(id("card-pips").textContent), id("card-pips").textContent.trim());
+});
+
+T("2.7 体力非法输入被清洗", async function () {
+	setVal(id("f-hp"), "abc");
+	await tick(20);
+	check("非法字符没留下", !/[a-z]/i.test(id("f-hp").value), "结果 " + id("f-hp").value);
+	setVal(id("f-hp"), "");
+	await tick(20);
+	check("空值不崩", true, "结果为「" + id("f-hp").value + "」");
+	setVal(id("f-hp"), "4/4/0");
+	await tick(20);
+});
+
+T("3.1 添加技能：第 3 张起展开数保持 2", async function () {
+	click(id("add-skill")); await tick(30);
+	check("共 3 张", skillItems().length === 3, "实为 " + skillItems().length);
+	check("展开 2 张", openCount() === 2, "展开 " + openCount());
+	var openIdx = qa('#skill-list .skill-item[data-open="true"]').map(function (el) {
+		return skillItems().indexOf(el) + 1;
+	});
+	check("展开的是第 2、3 张", openIdx.join(",") === "2,3", "实为 " + openIdx.join(","));
+	click(id("add-skill")); await tick(30);
+	var openIdx2 = qa('#skill-list .skill-item[data-open="true"]').map(function (el) {
+		return skillItems().indexOf(el) + 1;
+	});
+	check("再加一张仍是最后两张", openIdx2.join(",") === "3,4", "实为 " + openIdx2.join(","));
+});
+
+T("3.2 点击头部可收起/展开", async function () {
+	var item = skillItems()[0];
+	var head = item.querySelector(".skill-item__head");
+	click(head); await tick(20);
+	check("点击后展开", item.getAttribute("data-open") === "true", item.getAttribute("data-open"));
+	check("按钮文案 = 收起", /收起/.test(item.querySelector(".skill-item__toggle").textContent));
+	click(head); await tick(20);
+	check("再点收起", item.getAttribute("data-open") === "false", item.getAttribute("data-open"));
+	check("按钮文案 = 展开", /展开/.test(item.querySelector(".skill-item__toggle").textContent));
+	check("aria-expanded 同步", head.getAttribute("aria-expanded") === "false", head.getAttribute("aria-expanded"));
+});
+
+T("3.3 键盘 Enter 可切换", async function () {
+	var item = skillItems()[0];
+	var head = item.querySelector(".skill-item__head");
+	head.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+	await tick(20);
+	check("Enter 后展开", item.getAttribute("data-open") === "true", item.getAttribute("data-open"));
+});
+
+T("3.4 技能名同步到折叠摘要", async function () {
+	var item = skillItems()[0];
+	var input = item.querySelector("input.field__input");
+	setVal(input, "喵爪");
+	await tick(20);
+	check("摘要更新", /喵爪/.test(item.querySelector(".skill-item__preview").textContent),
+		item.querySelector(".skill-item__preview").textContent);
+});
+
+T("3.5 删除最后一张时按钮被禁用", async function () {
+	var items = skillItems();
+	/* 先删到只剩 1 张 */
+	while (skillItems().length > 1) {
+		var last = skillItems()[skillItems().length - 1];
+		last.querySelector(".skill-item__remove").click();
+		await tick(20);
+	}
+	var only = skillItems()[0];
+	check("只剩 1 张", skillItems().length === 1);
+	check("删除按钮 disabled", only.querySelector(".skill-item__remove").disabled === true);
+	check("技能块也只剩 1 个", moreBlocks().length === 1, "实为 " + moreBlocks().length);
+});
+
+T("4.1 技能块数量与技能卡同步", async function () {
+	await resetAll();
+	check("重置后 2 张卡 / 2 个块", skillItems().length === 2 && moreBlocks().length === 2,
+		skillItems().length + " / " + moreBlocks().length);
+	click(id("add-skill")); await tick(30);
+	check("加 1 张 → 3 个块", moreBlocks().length === 3, "实为 " + moreBlocks().length);
+});
+
+T("4.2 块标题跟随技能名", async function () {
+	var input = skillItems()[0].querySelector("input.field__input");
+	setVal(input, "喵喵叫");
+	await tick(20);
+	var name = moreBlocks()[0].querySelector(".more-skill__name").textContent.trim();
+	check("块标题 = 喵喵叫", name === "喵喵叫", name);
+});
+
+T("4.3 描述里的关键词自动勾类型", async function () {
+	var item = skillItems()[0];
+	var desc = item.querySelector("textarea");
+	setVal(desc, "锁定技，你受到伤害后摸一张牌。");
+	await tick(30);
+	var ck = checkedFlags(0);
+	check("锁定技被勾上", ck.indexOf("locked") >= 0, ck.join(","));
+	setVal(desc, "限定技，出牌阶段，你可以弃置所有牌。");
+	await tick(30);
+	ck = checkedFlags(0);
+	check("限定技被勾上", ck.indexOf("limited") >= 0, ck.join(","));
+	check("锁定技被取消", ck.indexOf("locked") < 0, ck.join(","));
+});
+
+T("4.4 删中间技能后台词不串位", async function () {
+	await resetAll();
+	click(id("add-skill")); await tick(30);
+	/* 三张卡分别写台词 A / B / C */
+	var lines = moreBlocks().map(function (b) { return b.querySelector("textarea"); });
+	check("有 3 个台词框", lines.length === 3, "实为 " + lines.length);
+	["A台词", "B台词", "C台词"].forEach(function (t, i) { setVal(lines[i], t); });
+	await tick(20);
+	/* 删掉中间那张 */
+	skillItems()[1].querySelector(".skill-item__remove").click();
+	await tick(40);
+	var after = moreBlocks().map(function (b) { return b.querySelector("textarea").value; });
+	check("剩 2 块", after.length === 2, after.join(" | "));
+	check("台词按技能对齐（A、C 保留）", after[0] === "A台词" && after[1] === "C台词", after.join(" | "));
+});
+
+T("4.5 补充说明与类型勾选在重建后保留", async function () {
+	var blk = moreBlocks()[0];
+	var notes = blk.querySelectorAll("textarea")[1];
+	setVal(notes, "觉醒条件 → 体力不大于 2");
+	var box = blk.querySelectorAll(".skill-flags input")[2];
+	box.checked = true; fire(box, "change");
+	await tick(20);
+	click(id("add-skill")); await tick(40);
+	var blk2 = moreBlocks()[0];
+	check("补充说明保留", blk2.querySelectorAll("textarea")[1].value === "觉醒条件 → 体力不大于 2",
+		blk2.querySelectorAll("textarea")[1].value);
+	check("手动勾选保留", blk2.querySelectorAll(".skill-flags input")[2].checked === true);
+});
+
+T("5.1 添加皮肤（真实图片文件）", async function () {
+	await resetAll();
+	var f = await makeImageFile("立绘.png", 700, 900);
+	setFiles(skinPicker(), [f]);
+	await tick(300);
+	check("出现 1 张皮肤卡", skins().length === 1, "实为 " + skins().length);
+	var img = skins()[0] && skins()[0].querySelector(".skin-chip__thumb");
+	check("缩略图有 dataURL", !!img && /^data:image\//.test(img.src || ""), img ? String(img.src).slice(0, 24) : "无图");
+	var note = skins()[0] && skins()[0].querySelector(".skin-chip__note").textContent;
+	check("标注裁成 350 × 464", /350/.test(note || ""), note || "");
+	check("空态占位已消失", w.getComputedStyle(id("skin-list"), "::before").content === "none" ||
+		w.getComputedStyle(id("skin-list"), "::before").content === "normal",
+		w.getComputedStyle(id("skin-list"), "::before").content);
+});
+
+T("5.2 非图片文件被拒", async function () {
+	var before = skins().length;
+	var f = new w.File([new Uint8Array(32)], "不是图片.txt", { type: "text/plain" });
+	setFiles(skinPicker(), [f]);
+	await tick(200);
+	check("数量没变", skins().length === before, skins().length + " vs " + before);
+	check("有提示", /不是图片/.test(status()), status());
+});
+
+T("5.3 移除皮肤卡", async function () {
+	var before = skins().length;
+	/* 皮肤卡片现在有「调整」和「移除」两个按钮，得按文本找，不能取第一个 */
+	var del = Array.prototype.slice.call(skins()[0].querySelectorAll("button")).filter(function (b) {
+		return b.textContent === "移除";
+	})[0];
+	click(del); await tick(30);
+	check("少了一张", skins().length === before - 1, "实为 " + skins().length);
+});
+
+T("5.4 皮肤上限 8 张", async function () {
+	await resetAll();
+	var files = [];
+	for (var i = 0; i < 10; i++) files.push(await makeImageFile("s" + i + ".png", 400, 520));
+	setFiles(skinPicker(), files);
+	await tick(600);
+	check("最多收到 8 张", skins().length === 8, "实为 " + skins().length);
+	check("有超限提示或静默截断", true, status());
+});
+
+T("6.1 配音：选中音频后出现条目", async function () {
+	await resetAll();
+	var inp = audioInputOf(0);
+	check("配音输入框存在", !!inp);
+	setFiles(inp, [makeAudioFile("voice1.mp3", 128)]);
+	await tick(60);
+	var chips = moreBlocks()[0].querySelectorAll(".skill-audio__list *");
+	check("出现 1 个配音条目", chips.length >= 1, "节点 " + chips.length + " 个");
+	check("显示序号或文件名", /1|voice1/.test(moreBlocks()[0].querySelector(".skill-audio").textContent));
+});
+
+T("6.2 提交时音频先单独上传再交表单", async function () {
+	await resetAll();
+	setVal(id("f-ext"), "测试扩展名");
+	setVal(id("f-name"), "喵将");
+	var inp = audioInputOf(0);
+	setFiles(inp, [makeAudioFile("v.mp3", 96)]);
+	await tick(60);
+	check("音频已挂在技能块上", (moreBlocks()[0]._audioEl || {})._audioFiles
+		? moreBlocks()[0]._audioEl._audioFiles.length === 1 : false,
+		"挂在 " + ((moreBlocks()[0]._audioEl || {})._audioFiles || []).length + " 个");
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(1200);
+	var audioCalls = sentTo("/api/audio");
+	check("调用过 /api/audio", audioCalls.length === 1, "调用 " + audioCalls.length + " 次");
+	var ho = lastJson();
+	check("调用过 /api/handoff", !!ho && ho.url.indexOf("/api/handoff") >= 0, ho ? ho.url : "没发");
+	if (ho) {
+		check("handoff 里没塞音频二进制（只记路径）", String(ho.body).length < 6000,
+			"payload " + String(ho.body).length + " 字节");
+	}
+});
+
+T("7.1 立绘：选图后出现画布", async function () {
+	await resetAll();
+	var f = await makeImageFile("头像.png", 900, 1200);
+	setFiles(id("cropper-file"), [f]);
+	await waitFor(function () {
+		return id("cropper").classList.contains("has-image") || !id("cropper-empty").offsetParent;
+	}, 40, 100);
+	check("裁剪器进入有图状态", id("cropper").classList.contains("has-image") ||
+		!id("cropper-empty").offsetParent, "class=" + id("cropper").className);
+	check("图片元素有 src", /^data:|^blob:/.test(id("cropper-image").src || ""),
+		String(id("cropper-image").src).slice(0, 20));
+});
+
+T("7.2 缩放滑杆改变图片变换", async function () {
+	var before = id("cropper-image").style.transform;
+	setVal(id("cropper-zoom"), "2");
+	await tick(60);
+	var after = id("cropper-image").style.transform;
+	check("transform 发生变化", before !== after, "before=" + before + " after=" + after);
+});
+
+T("7.3 导出头像产出 350×464 的图", async function () {
+	/* 导出走 canvas.toBlob（异步）→ URL.createObjectURL → a.click()。
+	 * 拦 createObjectURL 拿 blob 最稳，拦 a.click 会太早。 */
+	var blobs = [];
+	var origCreate = w.URL.createObjectURL;
+	w.URL.createObjectURL = function (b) { blobs.push(b); return origCreate.call(w.URL, b); };
+	var origClick = w.HTMLAnchorElement.prototype.click;
+	w.HTMLAnchorElement.prototype.click = function () {};
+	click(id("cropper-export"));
+	await tick(1200);            /* toBlob 是异步的，等足 */
+	w.URL.createObjectURL = origCreate;
+	w.HTMLAnchorElement.prototype.click = origClick;
+	check("导出产出了图片 blob", blobs.length === 1, "实为 " + blobs.length + " 个");
+	check("导出提示正确", /已导出/.test(status()), status());
+	if (!blobs.length) return;
+	var bmp = await new Promise(function (r) {
+		w.createImageBitmap(blobs[0]).then(function (b) { r(b); },
+			function () { r(null); });
+	});
+	check("导出尺寸 350×464", !!bmp && bmp.width === 350 && bmp.height === 464,
+		bmp ? bmp.width + "x" + bmp.height : "解码失败");
+	check("导出的是 jpeg", blobs[0].type === "image/jpeg", blobs[0].type);
+});
+
+T("7.4 立绘同步到卡面", async function () {
+	await tick(100);
+	check("卡面进入有立绘状态", id("hero-card").classList.contains("has-art"),
+		"class=" + id("hero-card").className);
+});
+
+T("8.1 缺扩展名 → 拦下并提示", async function () {
+	await resetAll();
+	installFetchSpy();
+	setVal(id("f-name"), "喵将");
+	click(id("btn-handoff"));
+	await tick(200);
+	check("没有发任何请求", sent.length === 0, "发了 " + sent.length + " 次");
+	check("提示扩展名为空", /扩展名/.test(status()), status());
+});
+
+T("8.2 缺武将名 → 拦下并提示", async function () {
+	await resetAll();
+	installFetchSpy();
+	setVal(id("f-ext"), "某扩展");
+	click(id("btn-handoff"));
+	await tick(200);
+	check("没有发请求", sent.length === 0);
+	check("提示武将名为空", /武将名/.test(status()), status());
+});
+
+T("8.3 体力填得比上限大 → 抬上限并说清楚", async function () {
+	await resetAll();
+	setVal(id("f-hp"), "6/4/0");
+	await tick(60);
+	check("上限被抬到 6（引擎会把超上限的体力压回上限，所以按体力抬）",
+		id("f-hp").value === "6/6/0", id("f-hp").value);
+	check("并且明确告诉了用户（不能静默改）", /上限/.test(status()), status());
+	/* 提交时 payload 里也应是抬过的值 */
+	setVal(id("f-ext"), "体力测试");
+	setVal(id("f-name"), "喵将");
+	await tick(30);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var p = lastJson();
+	check("payload 里 hp = 6/6/0", !!p && p.data.hp === "6/6/0", p ? p.data.hp : "没发");
+});
+T("8.4 客户端 payload 字段完整且空值不落键", async function () {
+	await resetAll();
+	setVal(id("f-ext"), "字段测试");
+	setVal(id("f-name"), "喵将");
+	setVal(id("f-title"), "喵号");
+	pickRadio("group", "wu");
+	pickRadio("sex", "female");
+	setVal(id("f-hp"), "4/4/2");
+	var desc = skillItems()[0].querySelector("textarea");
+	setVal(desc, "锁定技，摸牌。");
+	await tick(40);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var ho = lastJson();
+	check("发出 handoff", !!ho);
+	if (!ho) return;
+	var p = ho.data;
+	check("extName 正确", p.extName === "字段测试", p.extName);
+	check("name/title 正确", p.name === "喵将" && p.title === "喵号");
+	check("group=wu sex=female", p.group === "wu" && p.sex === "female", p.group + "/" + p.sex);
+	check("hp 三数保留", p.hp === "4/4/2", p.hp);
+	check("技能数组非空", Array.isArray(p.skills) && p.skills.length === 2, JSON.stringify(p.skills && p.skills.length));
+	check("空字段不落键（author/version/clans/characterIntro）",
+		!("author" in p) && !("version" in p) && !("clans" in p) && !("characterIntro" in p),
+		Object.keys(p).join(","));
+	check("没有多余上传路径", !("uploadPath" in p), Object.keys(p).join(","));
+});
+
+T("8.5 自定义势力时 group 留空、只带 groupCustom", async function () {
+	await resetAll();
+	setVal(id("f-ext"), "自定义势力测试");
+	setVal(id("f-name"), "喵将");
+	var inp = q(".choice--custom .choice__input");
+	click(inp); inp.value = "喵族"; fire(inp, "input");
+	await tick(30);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var p = lastJson().data;
+	check("group 为空", p.group === "", "group=" + JSON.stringify(p.group));
+	check("groupCustom = 喵族", p.groupCustom === "喵族", p.groupCustom);
+});
+
+T("8.6 国战/宗族/列传进 payload", async function () {
+	await resetAll();
+	setVal(id("f-ext"), "拓展字段测试");
+	setVal(id("f-name"), "喵将");
+	setVal(id("f-gz-group"), "jin");
+	var boxes = qa("#gz-groups input");
+	boxes[0].checked = true; boxes[4].checked = true;
+	fire(boxes[0], "change"); fire(boxes[4], "change");
+	setVal(id("f-clan"), "吴郡喵氏");
+	setVal(id("f-intro-bio"), "喵将者，猫中之霸也。");
+	await tick(30);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var p = lastJson().data;
+	check("guozhanGroup=jin", p.guozhanGroup === "jin", p.guozhanGroup);
+	check("doubleGroups 两项", Array.isArray(p.doubleGroups) && p.doubleGroups.length === 2,
+		JSON.stringify(p.doubleGroups));
+	check("clans = [吴郡喵氏]", Array.isArray(p.clans) && p.clans[0] === "吴郡喵氏", JSON.stringify(p.clans));
+	check("characterIntro 正确", p.characterIntro === "喵将者，猫中之霸也。", p.characterIntro);
+});
+
+T("8.7 前端保留下标对齐：第 1 张空、第 2 张配音时不串位", async function () {
+	/* 为什么这条重要：前端 `uploadAudioForSkills` 是拿**技能块下标**去索引
+	 * `payload.skills[i]`。如果谁图省事在前端把空技能卡压缩掉，下标就全错位 ——
+	 * 表现在「第 1 张空着、第 2 张有配音」时，配音会挂丢或挂到别人身上。
+	 * 所以前端必须保留全量，空壳交给服务端剔除（见 server.mjs normalizeSkills）。 */
+	await resetAll();
+	setVal(id("f-ext"), "对齐测试");
+	setVal(id("f-name"), "喵将");
+	setVal(skillItems()[1].querySelector("textarea"), "第二张技能的描述");
+	setFiles(audioInputOf(1), [makeAudioFile("two.mp3", 64)]);
+	await tick(200);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(1200);
+	var p = lastJson().data;
+	check("前端 payload 仍是 2 项（下标与技能块对齐）", p.skills.length === 2, "实为 " + p.skills.length);
+	check("配音上传被调用", sentTo("/api/audio").length === 1, "调用 " + sentTo("/api/audio").length + " 次");
+	check("配音路径回填到第 2 项（不是第 1 项）",
+		!!(p.skills[1].audioFiles && p.skills[1].audioFiles.length) && !p.skills[0].audioFiles,
+		JSON.stringify([p.skills[0].audioFiles || null, p.skills[1].audioFiles || null]));
+	check("空的第 1 项没有被填上描述", p.skills[0].desc === "", JSON.stringify(p.skills[0].desc));
+});
+
+
+T("9.1 清空按钮彻底复位", async function () {
+	setVal(id("f-ext"), "要清掉的");
+	setVal(id("f-name"), "要清掉的武将");
+	setVal(id("f-title"), "要清掉的称号");
+	setVal(id("f-clan"), "要清掉的宗族");
+	setVal(id("f-intro-bio"), "要清掉的列传");
+	setVal(id("f-die"), "要清掉的阵亡台词");
+	click(id("add-skill")); await tick(30);
+	var f2 = await makeImageFile("x.png", 300, 400);
+	setFiles(skinPicker(), [f2]);
+	await tick(300);
+	check("清空前确实有内容", skillItems().length === 3 || skins().length === 1,
+		skillItems().length + " 张卡 / " + skins().length + " 张皮肤");
+	/* 表单里的重置按钮（form=hero-form） */
+	var resetBtn = q('button[type="reset"][form="hero-form"]') ||
+		Array.prototype.filter.call(d.querySelectorAll('button[type="reset"]'), function (b) {
+			return b.form && b.form.id === "hero-form";
+		})[0];
+	check("找到清空按钮", !!resetBtn, resetBtn ? resetBtn.textContent.trim() : "没有");
+	if (resetBtn) {
+		click(resetBtn);
+		await tick(200);
+		check("扩展名已清", id("f-ext").value === "", id("f-ext").value);
+		check("武将名已清", id("f-name").value === "", id("f-name").value);
+		check("宗族已清", id("f-clan").value === "", id("f-clan").value);
+		check("列传已清", id("f-intro-bio").value === "", id("f-intro-bio").value);
+		check("阵亡台词已清", id("f-die").value === "", id("f-die").value);
+		check("技能回到 2 张示例卡", skillItems().length === 2, "实为 " + skillItems().length);
+		check("皮肤已清空", skins().length === 0, "实为 " + skins().length);
+		check("卡面回到默认名", id("card-name").textContent.trim() === "灰猫", id("card-name").textContent);
+	}
+});
+
+T("10.1 修改已有：上传文件夹 → 解析出武将", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(300);
+	var files = makeFixtureFiles("上传测试包");
+	check("夹具文件已造出", files.length === 3, files.length + " 个");
+	setFiles(id("edit-dir-input"), files);
+	await tick(2000);
+	check("状态提示解析成功", /解析出|解析/.test(status()), status());
+	check("选择框里显示包名", /上传测试包|testgood/.test(id("f-ext-existing").textContent),
+		id("f-ext-existing").textContent.replace(/\s+/g, " ").slice(0, 90));
+	var sel = id("f-name-existing");
+	check("武将下拉已填充", sel.options.length >= 2, sel.options.length + " 项");
+	check("含「测试武将」", /测试武将/.test(sel.textContent), sel.textContent.replace(/\s+/g, " "));
+});
+
+T("10.2 包介绍被读出来填上", async function () {
+	check("扩展包介绍已回填", /测试用最小扩展/.test(id("f-intro").value), id("f-intro").value);
+});
+T("10.2b 选武将后回填表单", async function () {
+	var sel = id("f-name-existing");
+	if (!sel || sel.options.length < 2) { bad("前置失败：武将下拉没数据"); return; }
+	sel.value = sel.options[1].value;
+	fire(sel, "change");
+	await tick(900);
+	check("武将名回填", id("f-name").value === "测试武将", id("f-name").value);
+	check("称号回填", id("f-title").value === "试作型", id("f-title").value);
+	var gw = d.querySelector('input[name="group"]:checked');
+	check("势力回填 = 魏", gw && gw.value === "wei", gw ? gw.value : "没选中");
+	check("技能名回填", /测试技/.test(skillItems()[0].querySelector("input.field__input").value),
+		skillItems()[0].querySelector("input.field__input").value);
+	check("技能描述回填", /锁定技/.test(skillItems()[0].querySelector("textarea").value),
+		skillItems()[0].querySelector("textarea").value);
+	var lines = moreBlocks()[0].querySelector("textarea").value;
+	check("台词回填", /摸牌只是顺手/.test(lines), lines);
+	check("类型勾选自动点亮", checkedFlags(0).indexOf("locked") >= 0, checkedFlags(0).join(","));
+	check("提交会带上 editTarget 的原值快照", true, "（下一步验）");
+});
+T("10.3 选武将后回填表单", async function () {
+	var sel = id("f-name-existing");
+	if (!sel || sel.options.length < 2) return;
+	sel.value = sel.options[1].value;
+	fire(sel, "change");
+	await tick(700);
+	check("武将名回填", id("f-name").value === "测试武将", id("f-name").value);
+	check("称号回填", id("f-title").value === "试作型", id("f-title").value);
+	var gw = d.querySelector('input[name="group"]:checked');
+	check("势力回填 = 魏", gw && gw.value === "wei", gw ? gw.value : "没选中");
+	check("技能名回填", /测试技/.test(skillItems()[0].querySelector("input.field__input").value),
+		skillItems()[0].querySelector("input.field__input").value);
+	check("技能描述回填", /锁定技/.test(skillItems()[0].querySelector("textarea").value),
+		skillItems()[0].querySelector("textarea").value);
+	var lines = moreBlocks()[0].querySelector("textarea").value;
+	check("台词回填", /摸牌只是顺手/.test(lines), lines);
+	check("类型勾选自动点亮", checkedFlags(0).indexOf("locked") >= 0, checkedFlags(0).join(","));
+});
+
+T("10.4 修改已有提交带 editTarget", async function () {
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(500);
+	var ho = lastJson();
+	check("发出 handoff", !!ho, ho ? ho.url : "没发");
+	if (!ho) return;
+	var p = ho.data;
+	check("extMode = edit", p.extMode === "edit", p.extMode);
+	check("带上 editTarget", !!p.editTarget, JSON.stringify(p.editTarget && p.editTarget.characterId));
+	check("editTarget 含原值快照", !!(p.editTarget && p.editTarget.original),
+		p.editTarget ? Object.keys(p.editTarget).join(",") : "无");
+});
+
+/* 清场：把工作区里的测试产物收拾掉 */
+T("11.1 扩展目标三种模式切换显示正确", async function () {
+	await resetAll();
+	pickRadio("extMode", "new"); await tick(200);
+	check("新建：扩展名输入可见", !!id("f-ext") && !id("f-ext").hidden, "hidden=" + id("f-ext").hidden);
+	pickRadio("extMode", "existing"); await tick(200);
+	check("加入已有：扩展名改为只读（由选中的 zip 决定）", id("f-ext").readOnly === true,
+		"readOnly=" + id("f-ext").readOnly);
+	check("加入已有：出现「选择 zip」按钮", id("ext-pick").hidden === false,
+		"hidden=" + id("ext-pick").hidden);
+	check("加入已有：扩展名被清空待填", id("f-ext").value === "", "「" + id("f-ext").value + "」");
+	pickRadio("extMode", "edit"); await tick(200);
+	check("修改已有：出现扩展选择", !id("f-ext-existing").hasAttribute("hidden"));
+	pickRadio("extMode", "new"); await tick(200);
+});
+
+
+/* ── 追加：夹具、真 zip、以及没覆盖到的路径 ───────────────────────────── */
+
+/** 造一个「文件夹选择」出来的 File：带 webkitRelativePath */
+function makeFixtureFiles(top) {
+	return Object.keys(FIXTURE).map(function (rel) {
+		var f = new w.File([FIXTURE[rel]], rel.split("/").pop(),
+			{ type: /\.json$/.test(rel) ? "application/json" : "text/javascript" });
+		try { Object.defineProperty(f, "webkitRelativePath", { value: top + "/" + rel }); } catch (e) {}
+		return f;
+	});
+}
+function b64ToFile(b64, name, type) {
+	var bin = atob(b64);
+	var u8 = new Uint8Array(bin.length);
+	for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+	return new w.File([u8], name, { type: type });
+}
+
+T("12.1 加入已有：上传 zip → 自动填扩展名，不要求选武将", async function () {
+	await resetAll();
+	pickRadio("extMode", "existing");
+	await tick(300);
+	setFiles(id("f-ext-dir"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	await tick(3000);
+	check("状态提示已解析", /已解析/.test(status()), status());
+	check("扩展名被自动填入", id("f-ext").value.length > 0, "「" + id("f-ext").value + "」");
+	check("按钮变成「换一个」", /换一个/.test(id("ext-pick").textContent), id("ext-pick").textContent);
+	check("没被要求选武将（下拉仍隐藏）", id("f-name-existing").hidden === true);
+});
+
+T("12.2 配音：单技能最多 6 个", async function () {
+	await resetAll();
+	var many = [];
+	for (var i = 0; i < 8; i++) many.push(makeAudioFile("v" + i + ".mp3", 64));
+	setFiles(audioInputOf(0), many);
+	await tick(200);
+	var chips = moreBlocks()[0].querySelectorAll(".audio-chip");
+	check("最多收 6 个", chips.length === 6, "实为 " + chips.length);
+	check("有超限提示", /最多放?\s*6\s*个/.test(status()), status());
+	check("序号按顺序标注", /第 1 句/.test(chips[0].textContent) && /第 6 句/.test(chips[5].textContent),
+		chips[0].textContent + " … " + chips[5].textContent);
+});
+
+T("12.3 配音：单个超 5MB 被拒", async function () {
+	await resetAll();
+	setFiles(audioInputOf(0), [makeAudioFile("huge.mp3", 6 * 1024 * 1024)]);
+	await tick(400);
+	check("一个都没收", moreBlocks()[0].querySelectorAll(".audio-chip").length === 0,
+		moreBlocks()[0].querySelectorAll(".audio-chip").length + " 个");
+	check("提示超过 5MB", /5MB/.test(status()), status());
+});
+
+T("12.4 配音条目可单独移除", async function () {
+	await resetAll();
+	setFiles(audioInputOf(0), [makeAudioFile("a.mp3", 64), makeAudioFile("b.mp3", 64)]);
+	await tick(200);
+	check("收了 2 个", moreBlocks()[0].querySelectorAll(".audio-chip").length === 2);
+	var del = moreBlocks()[0].querySelector(".audio-chip .audio-chip__btn--del");
+	check("有移除按钮", !!del);
+	if (del) {
+		click(del);
+		await tick(100);
+		check("减到 1 个", moreBlocks()[0].querySelectorAll(".audio-chip").length === 1,
+			moreBlocks()[0].querySelectorAll(".audio-chip").length + " 个");
+	}
+});
+
+T("12.5 回车不会提交表单", async function () {
+	await resetAll();
+	setVal(id("f-ext"), "回车测试");
+	setVal(id("f-name"), "喵将");
+	await tick(40);
+	installFetchSpy();
+	var ev = new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+	id("f-name").dispatchEvent(ev);
+	await tick(300);
+	check("没有发出任何请求", sent.length === 0, "发了 " + sent.length + " 次");
+	check("回车被拦下", ev.defaultPrevented === true, "defaultPrevented=" + ev.defaultPrevented);
+	var ta = skillItems()[0].querySelector("textarea");
+	var ev2 = new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+	ta.dispatchEvent(ev2);
+	check("文本框里的回车放行（换行）", ev2.defaultPrevented === false,
+		"defaultPrevented=" + ev2.defaultPrevented);
+});
+
+T("12.6 更多拓展收起再展开，填的东西还在", async function () {
+	setVal(moreBlocks()[0].querySelector("textarea"), "保持测试台词");
+	await tick(20);
+	click(id("more-toggle")); await tick(120);
+	check("已收起", id("more-panel").hasAttribute("hidden"));
+	click(id("more-toggle")); await tick(120);
+	check("又展开了", !id("more-panel").hasAttribute("hidden"));
+	check("台词没丢", moreBlocks()[0].querySelector("textarea").value === "保持测试台词",
+		moreBlocks()[0].querySelector("textarea").value);
+	check("按钮文案回到「收起拓展」", /收起/.test(id("more-toggle").textContent));
+});
+
+T("12.7 立绘：可拖动改构图 / 滚轮可缩放", async function () {
+	var f = await makeImageFile("拖拽.png", 900, 1200);
+	setFiles(id("cropper-file"), [f]);
+	await waitFor(function () { return /^data:|^blob:/.test(id("cropper-image").src || ""); }, 40, 100);
+	await tick(120);
+	var before = id("cropper-image").style.transform;
+	var vp = id("cropper-viewport");
+	try {
+		vp.dispatchEvent(new w.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 100, clientY: 100 }));
+		vp.dispatchEvent(new w.PointerEvent("pointermove", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 160, clientY: 140 }));
+		vp.dispatchEvent(new w.PointerEvent("pointerup", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 160, clientY: 140 }));
+	} catch (e) { /* 无头里 setPointerCapture 可能抛，不影响断言 */ }
+	await tick(80);
+	check("拖动改变了图片位置", id("cropper-image").style.transform !== before,
+		"before=" + before + " now=" + id("cropper-image").style.transform);
+
+	var zBefore = id("cropper-zoom").value;
+	vp.dispatchEvent(new w.WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 }));
+	await tick(80);
+	check("滚轮改变了缩放滑杆", id("cropper-zoom").value !== zBefore,
+		zBefore + " → " + id("cropper-zoom").value);
+});
+
+T("12.8 皮肤：超 8 张的提示与空态恢复", async function () {
+	await resetAll();
+	/* 只验"空态提示回来了"，不绑定具体文案 ——
+	 * 文案是产品措辞，会随需求改（原先这里写死 '"350 × 464"'，改文案就假失败）。 */
+	var cs = w.getComputedStyle(id("skin-list"), "::before");
+	check("空态占位回来了", cs && cs.content && cs.content !== "none", cs ? cs.content : "n/a");
+});
+
+T("12.9 真实端到端：真 fetch 提交并落盘", async function () {
+	if (hasSubmitAtStart) { ok("工作区里已有提交，跳过真实提交（不覆盖别人的）"); return; }
+	await resetAll();
+	w.fetch = origFetch;                       /* 恢复真请求，别再拦 */
+	setVal(id("f-ext"), "端到端测试包");
+	setVal(id("f-name"), "端到端喵");
+	setVal(id("f-title"), "端到端号");
+	pickRadio("group", "shu");
+	setVal(id("f-clan"), "端到端宗族");
+	setVal(id("f-intro-bio"), "端到端列传正文");
+	pickRadio("extMode", "new");
+	setVal(id("f-ext"), "端到端测试包");       /* 切模式会清扩展名，重新填 */
+	setVal(id("f-name"), "端到端喵");
+	await tick(80);
+	var desc = skillItems()[0].querySelector("textarea");
+	setVal(desc, "锁定技，出牌阶段，你可以摸一张牌。");
+	var lines = moreBlocks()[0].querySelector("textarea");
+	setVal(lines, "端到端台词一");
+	await tick(80);
+	click(id("btn-handoff"));
+	await tick(2500);
+	check("页面提示已提交", /已提交/.test(status()), status());
+});
+
+T("12.10 加入已有：提交带 uploadPath（AI 才知道往哪个包里加）", async function () {
+	if (hasSubmitAtStart) { ok("工作区里已有提交，跳过真实提交（不覆盖别人的）"); return; }
+	await resetAll();
+	pickRadio("extMode", "existing");
+	await tick(300);
+	setFiles(id("f-ext-dir"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	await tick(3000);
+	check("上传已解析", /已解析/.test(status()), status());
+	setVal(id("f-name"), "加入喵");
+	setVal(skillItems()[0].querySelector("textarea"), "加入已有测试技");
+	await tick(80);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var p = lastJson().data;
+	check("extMode = existing", p.extMode === "existing", p.extMode);
+	check("带上了 uploadPath", typeof p.uploadPath === "string" && p.uploadPath.length > 0,
+		String(p.uploadPath));
+	check("uploadPath 落在工作区的 uploaded 目录", /\.diy-workshop[\/\\]uploaded[\/\\]/.test(String(p.uploadPath)), String(p.uploadPath));
+});
+
+/* ── 13. 识别卡面面板的展开 / 收起 ──────────────────────────────────────── */
+
+T("13.1 清空表单时「识别卡面」面板自动收起", async function () {
+	var toggle = id("ci-toggle");
+	var panel = id("card-import");
+	check("入口按钮与面板都在", !!toggle && !!panel);
+	if (!toggle || !panel) return;
+
+	await resetAll();
+	check("清空后默认收起", panel.hidden === true, "hidden=" + panel.hidden);
+
+	click(toggle);
+	await tick(30);
+	check("点入口后展开", panel.hidden === false, "hidden=" + panel.hidden);
+	check("入口文案变成「收起」", toggle.textContent.trim() === "收起", toggle.textContent);
+	check("aria-expanded = true", toggle.getAttribute("aria-expanded") === "true", toggle.getAttribute("aria-expanded"));
+
+	/* 走 f.reset()（=「清空」按钮的真实路径），收起动作挂在 reset 事件上 */
+	await resetAll();
+	check("清空后面板收起", panel.hidden === true, "hidden=" + panel.hidden);
+	check("入口文案复位成「识别卡面」", toggle.textContent.trim() === "识别卡面", toggle.textContent);
+	check("aria-expanded = false", toggle.getAttribute("aria-expanded") === "false", toggle.getAttribute("aria-expanded"));
+});
+
+/* ── 13.2 / 13.3 卡面识别：选图 → 识别 → 回填 ──────────────────────────── */
+
+T("13.2 卡面识别：未选图时按钮禁用，选了卡面图才可点", async function () {
+	await resetAll();
+	await tick(60);
+	click(id("ci-toggle"));
+	await waitFor(function () { return id("card-import").hidden === false; }, 20, 50);
+
+	var start = id("ci-start");
+	check("未选图时「识别卡面」按钮禁用", start.disabled === true, "disabled=" + start.disabled);
+
+	/* 用 canvas 造一张真能解码的 PNG（ciStart 会 FileReader + 解码 + 裁块） */
+	setFiles(id("ci-card"), [await makeImageFile("card.jpg", 700, 1000)]);
+	await waitFor(function () { return start.disabled === false; }, 30, 100);
+	check("选了卡面图后按钮可用", start.disabled === false, "disabled=" + start.disabled);
+	check("文件名显示出来", /card\.jpg/.test(id("ci-name-card").textContent), id("ci-name-card").textContent);
+});
+
+T("13.3 卡面识别：取回的结果只填空白项，不覆盖已填内容", async function () {
+	await resetAll();
+	await tick(60);
+	click(id("ci-toggle"));
+	await waitFor(function () { return id("card-import").hidden === false; }, 20, 50);
+
+	/* 先手填一个名字 —— 识别结果**不该**把它覆盖掉（ciApply 只填空白） */
+	setVal(id("f-name"), "我自己起的名字");
+	setFiles(id("ci-card"), [await makeImageFile("card.jpg", 700, 1000)]);
+	await waitFor(function () { return id("ci-start").disabled === false; }, 30, 100);
+
+	/* 局部替换 fetch：只管这两个接口，跑完立刻还原，别污染别的用例 */
+	var orig = w.fetch;
+	var hits = [];
+	w.fetch = function (url) {
+		var u = String(url);
+		var reply = function (obj) {
+			return Promise.resolve({
+				ok: true,
+				status: 200,
+				json: function () { return Promise.resolve(obj); },
+			});
+		};
+		if (u.indexOf("/api/card-source") >= 0) { hits.push("source"); return reply({ ok: true, dir: "/tmp/fake/card" }); }
+		if (u.indexOf("/api/card-import") >= 0) {
+			hits.push("import");
+			/* 名字故意给一个不同的值，用来验证"不覆盖" */
+			return reply({ name: "识别出来的名字", title: "识别称号" });
+		}
+		return reply({ ok: true });
+	};
+
+	try {
+		click(id("ci-start"));
+		await waitFor(function () { return hits.indexOf("source") >= 0; }, 60, 100);
+		check("点「识别卡面」会先请求 /api/card-source", hits.indexOf("source") >= 0, "hits=" + hits.join(","));
+
+		/* 页面每 3 秒轮询一次，给足时间 */
+		await waitFor(function () { return hits.indexOf("import") >= 0; }, 80, 100);
+		check("随后开始轮询 /api/card-import", hits.indexOf("import") >= 0, "hits=" + hits.join(","));
+
+		await waitFor(function () { return id("f-title").value !== ""; }, 40, 100);
+		check("空白项被回填（称号）", id("f-title").value === "识别称号", id("f-title").value);
+		check("已填的武将名没被覆盖", id("f-name").value === "我自己起的名字", id("f-name").value);
+	} finally {
+		w.fetch = orig;
+	}
+});
+
+/* ── 14. 官方包当模板 ──────────────────────────────────────────────────── */
+/* 后两条要有"工作区里装了游戏"才跑得动 —— 没有就明确跳过，
+ * 不制造假失败（换台机器跑测试的环境差异）。 */
+
+T("14.1 官方包入口与选择区（结构）", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(60);
+	check("菜单里有「官方包」入口", !!id("edit-pick-official"));
+	var wrap = id("official-picker");
+	check("选择区默认隐藏", !!wrap && wrap.hidden === true, wrap ? "hidden=" + wrap.hidden : "缺元素");
+	check("包下拉 / 搜索框 / 武将下拉都在",
+		!!id("official-pack") && !!id("official-search") && !!id("official-char"));
+
+});
+
+T("14.2 官方包能列出包与武将（需工作区里有游戏）", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(60);
+	click(id("edit-pick-official"));
+	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
+
+	var packSel = id("official-pack");
+	await waitFor(function () { return packSel.options.length > 1; }, 80, 100);
+	if (packSel.options.length <= 1) {
+		ok("工作区里没有官方包可读，跳过本条");
+		return;
+	}
+	check("包下拉被填充", true, packSel.options.length + " 项");
+	packSel.value = packSel.options[1].value;
+	fire(packSel, "change");
+
+	var charSel = id("official-char");
+	await waitFor(function () { return charSel.options.length > 1; }, 120, 100);
+	check("武将下拉被填充", charSel.options.length > 1, charSel.options.length + " 项");
+
+	var total = charSel.options.length;
+	/* 取**前两个字**当关键词：只取一个字会踩坑 —— 比如 bingshi（兵势篇）
+	 * 整包武将名字都带"势"，搜"势"命中 34/34，断言看着过了其实什么都没验证。 */
+	var firstName = charSel.options[1].textContent.trim();
+	var kw = firstName.slice(0, 2);
+
+	setVal(id("official-search"), kw);
+	await tick(150);
+	check("搜索后候选减少", charSel.options.length < total,
+		kw + " → 从 " + total + " 降到 " + charSel.options.length);
+	check("留下的候选都含关键词", Array.prototype.slice.call(charSel.options, 1).every(function (o) {
+		return o.textContent.indexOf(kw) >= 0;
+	}), "关键词 " + kw);
+
+	setVal(id("official-search"), "");
+	await tick(120);
+	check("清空关键词后候选恢复", charSel.options.length === total,
+		"恢复到 " + charSel.options.length + " / 原 " + total);
+});
+
+T("14.3 选官方武将后填表，且扩展名留空（只能另建扩展）", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(60);
+	click(id("edit-pick-official"));
+	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
+	var packSel = id("official-pack");
+	await waitFor(function () { return packSel.options.length > 1; }, 80, 100);
+	if (packSel.options.length <= 1) {
+		ok("工作区里没有官方包可读，跳过本条");
+		return;
+	}
+	packSel.value = packSel.options[1].value;
+	fire(packSel, "change");
+	var charSel = id("official-char");
+	await waitFor(function () { return charSel.options.length > 1; }, 120, 100);
+	charSel.value = charSel.options[1].value;
+	fire(charSel, "change");
+	await tick(250);
+
+	check("武将名被填上", id("f-name").value.length > 0, id("f-name").value);
+	/* 关键红线：官方包名绝不能当成新扩展名 —— 那样 AI 会往游戏本体里写 */
+	check("扩展名留空（不会拿官方包名当扩展名）", id("f-ext").value === "", "f-ext=" + id("f-ext").value);
+	check("技能卡被填上", skillItems().some(function (it) {
+		return (it.querySelector("input").value || "").length > 0;
+	}), skillItems().length + " 张技能卡");
+});
+
+/* ── 15. 从工作区选择已有扩展（不用找 zip）────────────────────────────── */
+
+T("15.1 「工作区里已有的扩展」入口与选择区（结构）", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(60);
+	check("菜单里有「工作区里已有的扩展」入口", !!id("edit-pick-workspace"));
+	var wrap = id("workspace-picker");
+	check("选择区默认隐藏", !!wrap && wrap.hidden === true, wrap ? "hidden=" + wrap.hidden : "缺元素");
+	check("扩展下拉 / 武将下拉都在", !!id("workspace-ext") && !!id("workspace-char"));
+});
+
+T("15.2 点入口能列出工作区扩展，选中后扩展名就位", async function () {
+	await resetAll();
+	pickRadio("extMode", "edit");
+	await tick(60);
+	click(id("edit-pick-workspace"));
+	await waitFor(function () { return !id("workspace-picker").hidden; }, 20, 50);
+	check("选择区已展开", id("workspace-picker").hidden === false);
+
+	var extSel = id("workspace-ext");
+	await waitFor(function () { return extSel.options.length > 1; }, 60, 100);
+	if (extSel.options.length <= 1) {
+		ok("工作区里没有扩展，跳过本条（空态：" + extSel.options[0].textContent.trim() + "）");
+		return;
+	}
+	check("扩展下拉被填充", true, extSel.options.length + " 项：" +
+		Array.prototype.slice.call(extSel.options, 1).map(function (o) { return o.textContent; }).join("、"));
+
+	/* 只选**工作区里**的：选游戏包那份会触发"复制到工作区"，
+	 * 测试不该顺手往工作区里拷东西。没有就跳过选中步骤。 */
+	var wsOnly = Array.prototype.slice.call(extSel.options, 1).filter(function (o) {
+		return o.textContent.indexOf("（游戏包里") < 0;
+	});
+	if (!wsOnly.length) {
+		ok("下拉里只有游戏包里的扩展（选中会触发复制），跳过选中步骤");
+		return;
+	}
+
+	extSel.value = extSel.options[1].value;
+	fire(extSel, "change");
+	var charSel = id("workspace-char");
+	await waitFor(function () {
+		return charSel.options.length > 1 || /失败/.test(charSel.options[0].textContent);
+	}, 60, 100);
+	var charNames = Array.prototype.slice.call(charSel.options, 1).map(function (o) { return o.textContent.trim(); });
+	check("武将下拉被铺开（列出武将 / 明确报错 / 明确说 0 个）",
+		charNames.length > 0 || /失败/.test(charSel.options[0].textContent) || /0 个武将/.test(status()),
+		charNames.length ? charNames.join("、") : charSel.options[0].textContent.trim());
+	check("扩展名写进了表单（提交时 AI 才知道改哪个包）",
+		id("f-ext").value.length > 0, "f-ext=" + id("f-ext").value);
+});
+
+/* ── 运行 ─────────────────────────────────────────────────────────────── */
+fr.addEventListener("load", async function () {
+	d = fr.contentDocument;
+	w = fr.contentWindow;
+	Array.prototype.forEach.call(d.querySelectorAll(".reveal"), function (el) {
+		el.classList.add("is-in");
+	});
+	var st = d.createElement("style");
+	st.textContent = "*{animation:none!important;transition:none!important}";
+	d.head.appendChild(st);
+	await tick(300);
+
+	/* 真实提交那两条用例会写 <工作区>/.diy-workshop/latest-request.json。
+	 * 如果工作区里本来就有别人的提交（拿正式工作区跑测试），那就是覆盖人家 ——
+	 * 2026-10-15 真踩过（用户刚提交的表单被测试的「端到端」用例冲掉）。
+	 * 所以开跑前先问一次服务：已经有提交就跳过那两条。 */
+	try {
+		var h = await w.fetch("/api/health", { cache: "no-store" }).then(function (r) { return r.json(); });
+		hasSubmitAtStart = !!h && !!h.hasSubmit;
+	} catch (e) {
+		hasSubmitAtStart = false;
+	}
+	log("（工作区里已有提交：" + (hasSubmitAtStart ? "是 → 跳过真实提交用例" : "否") + "）");
+
+	for (var i = 0; i < cases.length; i++) {
+		var c = cases[i];
+		section(c.name);
+		try {
+			await c.fn();
+		} catch (e) {
+			bad(c.name + "（抛异常）", e && e.message ? e.message : String(e));
+			if (e && e.stack) log("      " + String(e.stack).split("\n").slice(0, 3).join("\n      "));
+		}
+		log("      · 状态行：" + (status() || "（空）"));
+		restoreFetch();
+	}
+	log("\n=== 合计：通过 " + pass + " 项，失败 " + fail + " 项 ===");
+});
+</script>
+</body>
+</html>
