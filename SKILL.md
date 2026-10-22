@@ -8,7 +8,7 @@ license: GPL-3.0
 agent_created: true
 metadata:
   author: OTH-C3
-  version: "1.1"
+  version: "1.2"
   verified_against: 无名杀 v1.11.5.2 实测 / 官方 v1.11.6 源码
 ---
 
