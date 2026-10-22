@@ -1,6 +1,6 @@
 # noname-diy
 
-<img src="preview.jpg?v=7" alt="网页工坊：左侧填武将设定，中间实时预览卡面，右侧裁立绘" width="100%" />
+<img src="preview-1.2.jpg" alt="网页工坊：左侧填武将设定，中间实时预览卡面，右侧裁立绘" width="100%" />
 
 <p align="center">
   <b>把中文技能描述转成可加载的无名杀武将扩展。</b><br/>
