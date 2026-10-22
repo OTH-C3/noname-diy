@@ -1057,7 +1057,10 @@ async function main() {
 			/* 只看该 storage 出现处附近，而不是整个技能块 ——
 			 * 同一个技能里可能有别的地方碰牌区（文伐的重铸回调就提到了
 			 * cardsGotoOrdering），按整块判断会把「牌名字符串数组」也误判成牌。 */
-			const mentionsCardZone = /cardsGotoSpecial|GotoOrdering|ui\.special/.test(around);
+			/* 碰牌的迹象要认全：归还牌的几种写法（loseToDiscardpile / cardsGoto*）、
+			 * 直接弃牌/拿牌（discardCard / gainCard）都算 —— 漏了会把「存牌」误判成简单值，
+			 * 不强制 onremove，牌就永久消失。 */
+			const mentionsCardZone = /cardsGotoSpecial|GotoOrdering|ui\.special|loseToDiscardpile|discardCard|gainCard/.test(around);
 			const pushesCardObject = /\.push\(\s*(?!get\.|["'`])/.test(around);
 			if (mentionsCardZone || pushesCardObject) rec.looksLikeCards = true;
 

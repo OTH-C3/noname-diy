@@ -89,17 +89,13 @@
 						<fieldset class="field field--group">
 							<legend class="field__label">扩展到</legend>
 							<div class="choice-row" role="radiogroup" aria-label="扩展到哪个扩展">
-								<label class="choice">
+									<label class="choice">
 									<input type="radio" name="extMode" value="new" checked />
 									<span>新建扩展</span>
 								</label>
 								<label class="choice">
 									<input type="radio" name="extMode" value="existing" />
-									<span>加入已有</span>
-								</label>
-								<label class="choice">
-									<input type="radio" name="extMode" value="edit" />
-									<span>修改已有</span>
+									<span>已有拓展</span>
 								</label>
 							</div>
 							<div class="field field--nested">
@@ -116,13 +112,11 @@
 										placeholder="例如：我的扩展"
 										autocomplete="off"
 									/>
-									<button type="button" class="field__inline-btn" id="ext-pick" hidden>
-										选择 zip
-									</button>
-								</div>
-								<input type="file" id="f-ext-dir" accept=".zip,application/zip" class="visually-hidden" />
+</div>
 
-								<!-- 修改已有：外形和上面那个框一致，点它展开「文件夹 / 压缩包」 -->
+								<!-- 加入已有 / 修改已有 共用这个选择框：点方框本身展开菜单
+								     （不再在右侧挤小按钮 —— 两个绝对定位按钮会叠在一起）。
+								     加入已有只显示「文件夹 / 压缩包 / 工作区」三项，官方包那项隐藏。 -->
 								<div id="f-ext-existing" hidden>
 									<details class="picker">
 										<summary class="field__input picker__summary">选择扩展包</summary>
@@ -134,10 +128,10 @@
 												选择压缩包（zip）
 											</button>
 											<button type="button" class="picker__item" id="edit-pick-official">
-												官方包（当模板，做自己的武将）
+												官方包（仅做模板，不可修改）
 											</button>
 											<button type="button" class="picker__item" id="edit-pick-workspace">
-												工作区里已有的扩展（不用上传）
+												工作区内扩展
 											</button>
 										</div>
 									</details>
@@ -164,7 +158,7 @@
 											</select>
 										</div>
 										<p class="field__hint">
-											官方武将只当模板：改完做成你自己的扩展，游戏里那个原武将不受影响。
+											挑一个官方武将读出设定，改完做成你自己的扩展。
 										</p>
 									</div>
 
@@ -175,7 +169,8 @@
 										<select class="field__input" id="workspace-ext" aria-label="选择工作区里已有的扩展">
 											<option value="">— 读取中 —</option>
 										</select>
-										<select class="field__input" id="workspace-char" aria-label="选择要改的武将">
+										<!-- 合并后武将统一用上方的 f-name-existing，这个下拉退役 -->
+										<select class="field__input" id="workspace-char" aria-label="选择要改的武将" hidden>
 											<option value="">— 先选扩展 —</option>
 										</select>
 										<p class="field__hint">
@@ -192,6 +187,22 @@
 
 						<div class="field">
 							<label class="field__label" for="f-name" id="name-label">武将名</label>
+							<!-- 已有拓展：先选一个已存在的武将修改（选了就改它） -->
+							<select class="field__input" id="f-name-existing" hidden aria-label="选择要修改的武将">
+								<option value="">— 选一个已有武将修改 —</option>
+							</select>
+							<!-- 官方包当模板时，这个位置换成「扩展名」——官方武将只做模板，产物是新建的扩展 -->
+							<input
+								class="field__input"
+								id="f-new-ext"
+								type="text"
+								maxlength="24"
+								placeholder="例如：我的扩展"
+								autocomplete="off"
+								hidden
+							/>
+							<!-- 同一个位置再给「新增」一个标签，两种模式各有各的语义 -->
+							<label class="field__label" for="f-name" id="name-label-2" hidden>武将名</label>
 							<input
 								class="field__input"
 								id="f-name"
@@ -201,10 +212,6 @@
 								placeholder="例如：灰猫"
 								autocomplete="off"
 							/>
-							<!-- 修改已有：先选扩展，再从里面挑武将 -->
-							<select class="field__input" id="f-name-existing" hidden aria-label="选择要修改的武将">
-								<option value="">— 请先选择扩展 —</option>
-							</select>
 							<p class="field__hint" id="name-hint">显示名，会写入 <code>translate</code></p>
 						</div>
 

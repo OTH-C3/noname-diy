@@ -176,6 +176,39 @@
 		background var(--dur-fast) var(--ease-out);
 }
 
+/* 必填项没填：红色描边 + 外扩光晕，2.2 秒内渐隐回常态。
+ * 只写一行状态文字容易被忽略，所以要让控件本身「闪一下」并配合滚动定位。 */
+@keyframes flag-missing {
+	0% {
+		border-color: rgba(196, 62, 42, 0.95);
+		box-shadow: 0 0 0 3px rgba(196, 62, 42, 0.42);
+		background-color: rgba(196, 62, 42, 0.1);
+	}
+	55% {
+		border-color: rgba(196, 62, 42, 0.7);
+		box-shadow: 0 0 0 4px rgba(196, 62, 42, 0.2);
+		background-color: rgba(196, 62, 42, 0.05);
+	}
+	100% {
+		border-color: var(--color-border);
+		box-shadow: 0 0 0 0 rgba(196, 62, 42, 0);
+		background-color: var(--color-surface);
+	}
+}
+
+.is-flagged {
+	animation: flag-missing 2.2s var(--ease-out, ease-out) forwards;
+}
+
+/* 尊重「减少动效」偏好：不闪烁，只留下静态红边（靠 JS 2.4 秒后摘类） */
+@media (prefers-reduced-motion: reduce) {
+	.is-flagged {
+		animation: none;
+		border-color: rgba(196, 62, 42, 0.9);
+		box-shadow: 0 0 0 3px rgba(196, 62, 42, 0.3);
+	}
+}
+
 .field__input::placeholder {
 	color: var(--color-muted);
 }

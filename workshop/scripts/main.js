@@ -1320,8 +1320,16 @@
 			);
 		});
 		if (!jobs.length) return Promise.resolve();
-		return Promise.all(jobs).then(function (list) {
-			if (list.length) payload.skins = list;
+		/* 一张失败不要连累其他：allSettled 逐张收，成功的进 payload，失败的跳过并说一声 */
+		return Promise.allSettled(jobs).then(function (results) {
+			var skins = [];
+			var failed = 0;
+			results.forEach(function (r) {
+				if (r.status === "fulfilled" && r.value) skins.push(r.value);
+				else failed++;
+			});
+			if (skins.length) payload.skins = skins;
+			if (failed) announce("有 " + failed + " 张皮肤图上传失败，已跳过，其余正常提交。");
 		});
 	}
 
@@ -1775,11 +1783,17 @@
 
 		/* 视口尺寸随窗口变化：重算基准缩放并保持构图 */
 		if (typeof ResizeObserver === "function") {
+			/* 拖窗口边缘会每帧触发一次，rAF 节流到每帧最多重绘一次 */
+			var resizePending = false;
 			var ro = new ResizeObserver(function () {
-				if (!crop.hasImage) return;
-				/* 视口尺寸变化时直接重新构图，而不是按比例缩放旧位移 ——
-				 * 比例法会把误差累积下来，几次重排之后构图就飘了。 */
-				centerCrop();
+				if (!crop.hasImage || resizePending) return;
+				resizePending = true;
+				requestAnimationFrame(function () {
+					resizePending = false;
+					/* 视口尺寸变化时直接重新构图，而不是按比例缩放旧位移 ——
+					 * 比例法会把误差累积下来，几次重排之后构图就飘了。 */
+					centerCrop();
+				});
 			});
 			ro.observe(cropViewport);
 		}
@@ -1901,11 +1915,14 @@
 				var nameSel = $("f-name-existing");
 				if (nameSel) {
 					nameSel.value = "";
-					nameSel.innerHTML = '<option value="">— 请先选择扩展 —</option>';
+					nameSel.innerHTML = '<option value="">— 先选扩展 —</option>';
 				}
 				existingChars = [];
 				existingExtName = "";
 				uploadedRoot = "";
+				pickedCharId = "";
+				existingOriginal = null;
+				existingSource = "";
 
 				/* 模式复位到「新建扩展」，控件显示状态一起复位 */
 				var newRadio = document.querySelector('input[name="extMode"][value="new"]');
@@ -1970,6 +1987,27 @@
 	function announce(message) {
 		var host = $("form-status");
 		if (host) host.textContent = message;
+	}
+
+	/* 必填项没填时给出醒目提示：滚到那个控件、红色高亮后渐隐。
+	 * 只写一行状态文字太容易被忽略（用户确实这么反馈过），所以视觉上要「指过去」。
+	 * 动画用 CSS 关键帧，这里只负责加/摘类；每次重新触发都要先摘类 + 强制回流，
+	 * 否则连续点两次提交时第二次不会重播。 */
+	function flagMissing(el, message) {
+		if (!el) return;
+		try {
+			el.scrollIntoView({ behavior: "smooth", block: "center" });
+		} catch (e) {
+			el.scrollIntoView();
+		}
+		el.classList.remove("is-flagged");
+		void el.offsetWidth; /* 强制回流，让动画能重播 */
+		el.classList.add("is-flagged");
+		clearTimeout(el._flagTimer);
+		el._flagTimer = setTimeout(function () {
+			el.classList.remove("is-flagged");
+		}, 2400);
+		announce(message);
 	}
 
 	/* ── 启动 ──────────────────────────────────────────────────────────── */
@@ -2038,9 +2076,18 @@
 		var modeRadio = document.querySelector('input[name="extMode"]:checked');
 		var groupCustom = fieldValue("f-group-custom");
 
+		/* 官方包当模板：产物是**新建的独立扩展**，不是改官方那个包。
+		 * 所以模式按「新建」算，扩展名取下面那个「扩展名」框
+		 * （选了官方包之后 f-ext 是隐藏的，值是空的）。 */
+		/* 以**界面实际状态**判断是不是「官方模板模式」，不要看 officialPick 变量 ——
+		 * 那个变量点过一次官方包就一直留着，用户切回「新建扩展」填了 f-ext 之后，
+		 * 这里还会去读那个隐藏的空框，于是「填了也提示没填」。 */
+		var newExtEl = $("f-new-ext");
+		var officialMode = !!(newExtEl && !newExtEl.hidden);
+
 		var payload = {
-			extMode: modeRadio ? modeRadio.value : "new",
-			extName: fieldValue("f-ext"),
+			extMode: officialMode ? "new" : modeRadio ? modeRadio.value : "new",
+			extName: officialMode ? fieldValue("f-new-ext") : fieldValue("f-ext"),
 			name: fieldValue("f-name"),
 			title: fieldValue("f-title"),
 			/* 自定义势力非空时 group 必须留空、以 groupCustom 为准 ——
@@ -2102,13 +2149,15 @@
 	/* 上传过的扩展留在工作区里：把落点交给 AI ——
 	 * 「加入已有」要往里追加武将，「修改已有」要就地改字段。
 	 * 没有它，上传来的包对 AI 来说等于不存在（审计 2026-10-10 的断点）。 */
-	if (uploadedRoot && (payload.extMode === "existing" || payload.extMode === "edit")) {
+	if (uploadedRoot && payload.extMode === "existing") {
 		payload.uploadPath = uploadedRoot;
 	}
 
 	/* 官方包当模板：把来源一起交给 AI。它据此知道「这是官方武将的模板，只能另建
 	 * 扩展」—— 官方武将不能改（游戏本体只读），这条红线就靠这个标记兜住。 */
-	if (officialPick && officialPick.charId) {
+	/* 只有确实在「官方模板模式」时才带模板标记 —— 与扩展名走同一个判断，
+	 * 免得新建扩展时也把旧官方包的信息带出去 */
+	if (officialMode && officialPick && officialPick.pack) {
 		payload.officialTemplate = {
 			pack: officialPick.pack,
 			packLabel: officialPick.label || "",
@@ -2120,7 +2169,9 @@
 	/* 修改已有：把「改的是哪个扩展的哪个武将」和读出来的原值一起交出去。
 	 * AI 拿到 original 就能算出用户改了哪些字段，只改那几处 ——
 	 * 整块重写容易丢掉原文件里的其他内容（别的武将、卡片、注释）。 */
-	if (payload.extMode === "edit" && existingExtName && pickedCharId && existingOriginal) {
+	/* 已有拓展：选了武将 → 连同 original 一起交出去，AI 只改那几处；
+	 * 没选武将 → 不带 editTarget，AI 按「追加新武将」处理。 */
+	if (payload.extMode === "existing" && existingExtName && pickedCharId && existingOriginal) {
 		payload.editTarget = {
 			extName: existingExtName,
 			characterId: pickedCharId,
@@ -2148,11 +2199,22 @@
 
 		var payload = collectForm();
 		if (!payload.extName) {
-			announce("还没填扩展名。新建就起个名字，加入已有就选一下扩展的 zip。");
+			/* 三种情况分别指向当前真正可见的那个框：
+			 *   新建 → 手打扩展名框
+			 *   官方包当模板 → 下方那个「扩展名」框
+			 *   其他已有拓展 → 「选择扩展包」的方框 */
+			var extEl = $("f-ext");
+			var newExtEl = $("f-new-ext");
+			var extTarget = newExtEl && !newExtEl.hidden
+				? newExtEl
+				: extEl && !extEl.hidden
+					? extEl
+					: document.querySelector("#f-ext-existing summary");
+			flagMissing(extTarget, "尚未选择或填写扩展名。");
 			return;
 		}
 		if (!payload.name) {
-			announce("武将名还是空的，至少给个名字。");
+			flagMissing($("f-name"), "尚未填写武将名。");
 			return;
 		}
 
@@ -2318,6 +2380,8 @@
 
 		openBtn.addEventListener("click", function () {
 			closePicker();
+			var other = $("workspace-picker");
+			if (other) other.hidden = true; /* 来源互斥：开这个关那个 */
 			wrap.hidden = false;
 			loadOfficialPacks();
 		});
@@ -2344,6 +2408,11 @@
 					existingExtName = "";
 					existingSource = "official";
 					officialPick = { pack: data.name, label: data.label || data.name, charId: "", name: "" };
+					/* 选了哪个官方包要显示在方框上，否则摘要一直是「选择扩展包」 */
+					setPickerSummary(data.label || data.name);
+					/* 一选包就切到「扩展名」：官方包只能当模板，产物必然是新扩展，
+					 * 不必等用户挑完武将才有地方填名字（原先卡在这，用户填不了扩展名）。 */
+					setNameFieldMode("ext", true);
 					fillOfficialChars();
 					if (search) search.value = "";
 					announce(
@@ -2358,9 +2427,20 @@
 
 		charSel.addEventListener("change", function () {
 			var id = charSel.value;
-			if (!id) return;
+			if (!id) {
+				/* 取消选武将，但包还选着 —— 仍是模板模式，保持「扩展名」，
+				 * 不要切回「选择武将」（否则没地方填扩展名） */
+				if (officialPick) {
+					officialPick.charId = "";
+					officialPick.name = "";
+				}
+				return;
+			}
 			/* 复用「修改已有」那套回填（名字/称号/势力/性别/体力/技能/立绘） */
 			applyCharacter(id);
+			/* 官方包只能当模板：下面那组切成「扩展名」，让用户给新扩展起名。
+			 * 这里带 reset —— 前面选的扩展落点确实作废了。 */
+			setNameFieldMode("ext", true);
 			if (officialPick) {
 				officialPick.charId = id;
 				var picked = existingChars.filter(function (c) { return c.id === id; })[0];
@@ -2397,6 +2477,8 @@
 
 		openBtn.addEventListener("click", function () {
 			closePicker();
+			var other = $("official-picker");
+			if (other) other.hidden = true; /* 来源互斥：开这个关那个 */
 			wrap.hidden = false;
 			loadWorkspaceExtensions();
 		});
@@ -2439,14 +2521,16 @@
 					uploadedRoot = info.path || "";
 					existingExtName = info.name || name;
 					existingSource = "installed";
+					/* 换了扩展，之前选的武将作废（同上） */
+					pickedCharId = "";
+					existingOriginal = null;
 					/* 扩展名写进表单 —— 与上传那条路（handleZipPick）保持一致 */
 					var extInput = $("f-ext");
 					if (extInput) extInput.value = existingExtName;
 					setPickerSummary(existingExtName);
 					if (copied) {
 						announce(
-							"游戏包里那份是只读的，已复制成工作区副本「" + existingExtName +
-								"」，改动会落在副本上。",
+							"游戏包里那份是只读的，已复制成工作区副本「" + existingExtName + "」。",
 						);
 					}
 					return fetch("/api/extension-characters?name=" + encodeURIComponent(name), {
@@ -2463,10 +2547,12 @@
 					existingChars = data.characters || [];
 					/* 扩展包介绍是整包级的，单独回填一次 */
 					if (data.intro) setFieldValue("f-intro", data.intro);
-					fillWorkspaceChars();
+					/* 武将统一铺进上方的「选择武将」（合并后不再有独立的工作区武将下拉） */
+					fillCharacterSelect();
+					/* 从官方包切回工作区扩展：下面那组恢复成「选择武将」 */
+					setNameFieldMode("char");
 					announce(
-						"已读入「" + existingExtName + "」的 " + existingChars.length + " 个武将 —— 挑一个改，改动会写回" +
-							(copied ? "工作区里的副本。" : "该目录。"),
+						"已读入「" + existingExtName + "」的 " + existingChars.length + " 个武将。挑一个改它，或直接填新武将名。",
 					);
 				})
 				.catch(function (err) {
@@ -2493,7 +2579,12 @@
 				if (!data.ok) throw new Error(data.error || "读不到扩展列表");
 				/* 全都列出来：工作区里的直接改；游戏包里那份是只读的，
 				 * 选中后先复制成工作区副本（选项上标出来，别让人以为能就地改）。 */
-				workspaceExts = (data.extensions || []).filter(function (x) { return x.path; });
+				var list = (data.extensions || []).filter(function (x) { return x.path; });
+				/* 「加入已有」只列自己做的：官方包是游戏本体，往里加武将等于改游戏 */
+				if (currentExtPurpose() === "existing") {
+					list = list.filter(function (x) { return x.origin === "工作区"; });
+				}
+				workspaceExts = list;
 				if (!workspaceExts.length) {
 					extSel.innerHTML = '<option value="">— 没找到扩展 —</option>';
 					return;
@@ -2512,6 +2603,7 @@
 				extSel.innerHTML = '<option value="">读取失败：' + escapeText(err.message) + "</option>";
 			});
 	}
+
 
 	/* 铺工作区扩展的武将下拉 */
 	function fillWorkspaceChars() {
@@ -2587,10 +2679,52 @@
 	function closePicker() {
 		var picker = document.querySelector("#f-ext-existing details.picker");
 		if (picker && picker.open) picker.open = false;
+		/* 两个来源面板也一起收 —— 它们之间没有互斥，先点一个再点另一个会叠着显示 */
+		var op = $("official-picker");
+		var wp = $("workspace-picker");
+		if (op) op.hidden = true;
+		if (wp) wp.hidden = true;
 	}
 
+	/* 点在选择框外面就收起菜单 —— <details> 没有这个原生行为，得自己兜。
+	 * 用 pointerdown + 立即判断（不等 click），否则菜单内的点击冒泡到 document
+	 * 会被当成"点外面"把菜单关掉。 */
+	document.addEventListener("pointerdown", function (e) {
+		var picker = document.querySelector("#f-ext-existing details.picker");
+		if (picker && picker.open) {
+			var wrap = document.getElementById("f-ext-existing");
+			if (wrap && !wrap.contains(e.target)) picker.open = false;
+		}
+	}, true);
+
 	/* 选文件夹：逐个文件转 base64 上传 */
-	function handleDirPick(files) {
+	/* 当前模式决定「选完包之后干什么」：
+	 * existing（加入已有）只取扩展名；修改已有一路要回填武将。
+	 * 菜单是两种模式共用的，所以 purpose 在这里现查，不靠按钮各自记。 */
+	function currentExtPurpose() {
+		var el = document.querySelector('input[name="extMode"]:checked');
+		return el && el.value === "existing" ? "existing" : undefined;
+	}
+
+	/* 两种模式的菜单顺序不一样（按用户指定的排）：
+	 *   加入已有 → 工作区 / 文件夹 / 压缩包
+	 *   修改已有 → 工作区 / 官方包 / 文件夹 / 压缩包
+	 * 菜单是共用的一块 DOM，所以在这里按模式重新 append 一遍来定顺序。 */
+	function reorderPickerItems(mode) {
+		var menu = document.querySelector("#f-ext-existing .picker__menu");
+		if (!menu) return;
+		var ws = $("edit-pick-workspace");
+		var dir = $("edit-pick-dir");
+		var zip = $("edit-pick-zip");
+		var official = $("edit-pick-official");
+		/* 合并后只剩一种顺序（两种模式都用它）：工作区 / 官方包 / 文件夹 / 压缩包 */
+		var seq = [ws, official, dir, zip];
+		seq.forEach(function (el) {
+			if (el) menu.appendChild(el); /* append 会把元素移到末尾，按 seq 顺序走即可 */
+		});
+	}
+
+	function handleDirPick(files, purpose) {
 		if (!files.length) return;
 		if (files.length > 800) {
 			announce("这个文件夹文件太多（" + files.length + " 个），建议先压成 zip 再选。");
@@ -2615,7 +2749,7 @@
 			}),
 		).then(function (list) {
 			var top = (files[0].webkitRelativePath || "").split("/")[0] || "扩展";
-			uploadForRead({ kind: "dir", name: top, files: list.filter(Boolean) });
+			uploadForRead({ kind: "dir", name: top, files: list.filter(Boolean) }, purpose || currentExtPurpose());
 		});
 	}
 
@@ -2629,7 +2763,7 @@
 			var s = String(reader.result);
 			uploadForRead(
 				{ kind: "zip", name: file.name, data: s.slice(s.indexOf(",") + 1) },
-				purpose,
+				purpose || currentExtPurpose(),
 			);
 		};
 		reader.readAsDataURL(file);
@@ -2650,6 +2784,10 @@
 			.then(function (data) {
 				existingChars = data.characters || [];
 				existingExtName = data.name || "";
+				/* 换了扩展，之前选的武将作废 —— 不清的话，用户改选扩展却没重选武将，
+				 * 提交时 editTarget 会带着上一个扩展的武将 original 去改当前扩展 */
+				pickedCharId = "";
+				existingOriginal = null;
 				existingSource = "upload";
 				/* 服务端把包留在工作区里了，这个路径要一起交给 AI ——
 				 * 「加入已有」靠它追加、「修改已有」靠它就地把字段改回去 */
@@ -2664,18 +2802,21 @@
 				if (purpose === "existing") {
 					var extInput = $("f-ext");
 					if (extInput) extInput.value = existingExtName;
-					var pickBtn = $("ext-pick");
-					if (pickBtn) pickBtn.textContent = "换一个";
-					announce("已解析扩展「" + existingExtName + "」，新武将会追加进去。");
-					return;
+					/* 合并成「已有拓展」后，武将下拉一直显示 —— 不再提前返回，
+					 * 继续往下把武将填上，让用户能挑一个改它，或者不挑直接追加 */
 				}
 
 				fillCharacterSelect();
+				/* 文件夹 / zip 解析成功：这是「改这个包」，下面那组回到「选择武将」 */
+				setNameFieldMode("char");
 				if (!existingChars.length) {
 					announce(data.unreadable || "这个包里没解析出武将，可以手动填。");
 					return;
 				}
-				announce("解析出 " + existingChars.length + " 个武将，选一个开始改。");
+				announce(
+					"已解析扩展「" + existingExtName + "」的 " + existingChars.length +
+						" 个武将。可选择要修改的武将，或填写新武将名。",
+				);
 			})
 			.catch(function (err) {
 				announce("读取失败：" + err.message);
@@ -2696,7 +2837,7 @@
 			sel.innerHTML = '<option value="">— 这个包没解析出武将 —</option>';
 			return;
 		}
-		var opts = ['<option value="">— 请选择武将 —</option>'];
+		var opts = ['<option value="">— 选一个已有武将修改 —</option>'];
 		existingChars.forEach(function (c) {
 			opts.push(
 				'<option value="' + escapeAttr(c.id) + '">' +
@@ -2708,57 +2849,127 @@
 	}
 
 	/* 按模式切换各块：修改已有把「扩展名 / 武将名」换成下拉 */
+	/* 下面这组字段有两种语义，按扩展来源切换：
+	 *   "char"（默认）→「选择武将」：改这个扩展里已有的武将
+	 *   "ext"         →「扩展名」：官方包只能当模板，产物是新建的扩展，得让用户起名
+	 * 官方包里那份是只读的，所以选中官方武将之后不是「改」，而是「照着做一份新的」。 */
+	function setNameFieldMode(mode, reset) {
+		var label = $("name-label");
+		var sel = $("f-name-existing");
+		var newExt = $("f-new-ext");
+		var label2 = $("name-label-2");
+		var hint = $("name-hint");
+		var isExt = mode === "ext";
+
+		if (label) {
+			label.textContent = isExt ? "扩展名" : "选择武将";
+			label.setAttribute("for", isExt ? "f-new-ext" : "f-name-existing");
+		}
+		if (sel) sel.hidden = isExt;
+		if (newExt) newExt.hidden = !isExt;
+		if (label2) label2.hidden = false;
+		if (hint) {
+			hint.innerHTML = isExt
+				? "官方武将只做模板。这里填新扩展的名字，游戏里那个原武将不受影响。"
+				: "选中上面的武将则修改它；不选则按武将名新增。";
+		}
+		/* 只有**真正切到官方包**（reset）才清落点：不清会把 uploadPath / editTarget
+		 * 带到 payload 里，AI 会去改别人的包。
+		 * 切模式恢复状态时不能清 —— 否则用户切走再切回，之前选的扩展就没了。 */
+		if (isExt && reset) {
+			uploadedRoot = "";
+			existingExtName = "";
+			existingSource = "";
+			existingOriginal = null;
+			pickedCharId = "";
+		}
+	}
+
+	/* 切到「新建扩展」时记下「来源面板」和「字段语义」，切回「已有拓展」时恢复 ——
+	 * 否则用户切一圈回来，之前选好的扩展、武将、面板全得重来。 */
+	var lastSourcePanel = "";
+	var lastNameMode = "char";
+
 	function applyExtMode(mode) {
+		/* 切走之前先记下当前状态，切回来要还原 */
+		if (mode !== "existing") {
+			var op0 = $("official-picker");
+			var wp0 = $("workspace-picker");
+			lastSourcePanel = op0 && !op0.hidden ? "official" : wp0 && !wp0.hidden ? "workspace" : "";
+			var ne0 = $("f-new-ext");
+			lastNameMode = ne0 && !ne0.hidden ? "ext" : "char";
+		}
+		closePicker(); /* 切模式先收起展开的菜单，不然旧菜单一直挂着 */
 		var extInput = $("f-ext");
 		var extSelect = $("f-ext-existing");
-		var extPick = $("ext-pick");
+		var officialItem = $("edit-pick-official");
 		var extLabel = $("ext-label");
 		var extHint = $("ext-hint");
 		var nameInput = $("f-name");
 		var nameSelect = $("f-name-existing");
 		var nameLabel = $("name-label");
+		var nameLabel2 = $("name-label-2");
 		var nameHint = $("name-hint");
 
-		if (mode === "edit") {
+		if (mode === "existing") {
+			/* 已有拓展（原「加入已有」+「修改已有」合并）：
+			 * 点方框选扩展 → 再决定「挑一个武将改它」还是「手打名字追加新的」。
+			 * 两条路共用一个选择框，所以这里把武将下拉和武将名输入**都显示**。 */
 			if (extInput) extInput.hidden = true;
 			if (extSelect) extSelect.hidden = false;
-			if (extPick) extPick.hidden = true;
+			if (officialItem) officialItem.hidden = false;
 			if (extLabel) extLabel.textContent = "选择扩展";
-			if (extHint) extHint.textContent = "推荐先手动解压，再选文件夹。直接选 zip 由脚本自动解压，极少数非常规压缩包可能解不开。";
-			if (nameInput) nameInput.hidden = true;
-			if (nameSelect) nameSelect.hidden = false;
-			if (nameLabel) nameLabel.textContent = "选择武将";
-			if (nameHint) nameHint.textContent = "选好后会自动填入称号、势力、性别、体力、技能与立绘。";
+			if (extHint) extHint.hidden = true;
+			/* 恢复上次的字段语义（选过官方包就是「扩展名」，否则「选择武将」）——
+			 * 恢复时不带 reset，免得把已有的选择清掉 */
+			setNameFieldMode(lastNameMode);
+			if (nameInput) {
+				nameInput.hidden = false;
+				nameInput.placeholder = "新增武将时填这里";
+			}
+			/* 恢复扩展名与选择框摘要，再按记录把来源面板重新打开。
+			 * 官方包当模板时 existingExtName 是空的（产物是新扩展），
+			 * 摘要要用包名，否则会被重置成「选择扩展包」。 */
+			if (extInput) extInput.value = existingExtName || "";
+			var pickSummary = officialPick && officialPick.pack
+				? officialPick.label || officialPick.pack || ""
+				: existingExtName || "";
+			setPickerSummary(pickSummary);
+			if (lastSourcePanel === "official") {
+				var op1 = $("official-picker");
+				if (op1) op1.hidden = false;
+			} else if (lastSourcePanel === "workspace") {
+				var wp1 = $("workspace-picker");
+				if (wp1) wp1.hidden = false;
+			}
+			reorderPickerItems("existing");
 			return;
 		}
 
+		/* 新建 */
 		if (extInput) extInput.hidden = false;
 		if (extSelect) extSelect.hidden = true;
-		if (nameInput) nameInput.hidden = false;
-		if (nameSelect) nameSelect.hidden = true;
-		if (nameLabel) nameLabel.textContent = "武将名";
-		if (nameHint) nameHint.innerHTML = "显示名，会写入 <code>translate</code>";
-
-		if (mode === "existing") {
-			/* 加入已有：扩展名来自 zip，不让手打，框里只显示选中的文件名 */
-			if (extPick) extPick.hidden = false;
-			if (extInput) {
-				extInput.readOnly = true;
-				extInput.placeholder = "点右侧按钮选择 zip";
-				extInput.value = "";
-			}
-			if (extLabel) extLabel.textContent = "扩展 zip";
-			if (extHint) extHint.textContent = "选一个扩展的 zip，新武将会追加进去，旧内容不动。";
-		} else {
-			if (extPick) extPick.hidden = true;
-			if (extInput) {
-				extInput.readOnly = false;
-				extInput.placeholder = "例如：我的扩展";
-				extInput.value = "";
-			}
-			if (extLabel) extLabel.textContent = "扩展名";
-			if (extHint) extHint.textContent = "文件夹名即扩展名。新建的包连同 info.json / extension.js / 头像一起生成。";
+		if (officialItem) officialItem.hidden = false;
+		if (nameInput) {
+			nameInput.hidden = false;
+			nameInput.placeholder = "例如：灰猫";
 		}
+		if (nameSelect) nameSelect.hidden = true;
+		if (nameLabel) {
+			nameLabel.textContent = "武将名";
+			nameLabel.setAttribute("for", "f-name");
+		}
+		if (nameLabel2) nameLabel2.hidden = true;
+		var newExtNew = $("f-new-ext");
+		if (newExtNew) newExtNew.hidden = true;
+		if (nameHint) nameHint.innerHTML = "显示名，会写入 <code>translate</code>";
+		if (extInput) {
+			extInput.readOnly = false;
+			extInput.placeholder = "例如：我的扩展";
+			extInput.value = "";
+		}
+		if (extLabel) extLabel.textContent = "扩展名";
+		if (extHint) extHint.textContent = "文件夹名即扩展名。新建的包连同 info.json / extension.js / 头像一起生成。";
 	}
 
 	function loadCharacters(extName) {
@@ -2768,7 +2979,7 @@
 		existingChars = [];
 
 		if (!extName) {
-			sel.innerHTML = '<option value="">— 请先选择扩展 —</option>';
+			sel.innerHTML = '<option value="">— 先选扩展 —</option>';
 			return;
 		}
 		sel.innerHTML = '<option value="">— 读取中 —</option>';

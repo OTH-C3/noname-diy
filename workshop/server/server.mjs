@@ -496,6 +496,12 @@ const server = createServer(async (req, res) => {
 	/* 读一张图片（立绘原图）。只允许读工作区内的图片文件，防路径穿越。 */
 	if (path === "/api/avatar") {
 		const raw = String(url.searchParams.get("path") || "");
+		/* 空路径会 resolve 成 cwd()，是否越界取决于 WORKSPACE 是不是恰好等于 cwd ——
+		 * 不能靠这种巧合，先显式拒掉。 */
+		if (!raw) {
+			json(res, 400, { error: "缺 path 参数" });
+			return;
+		}
 		const target = resolve(raw);
 		if (!isInside(WORKSPACE, target) || !/\.(?:jpe?g|png|webp|gif)$/i.test(target)) {
 			json(res, 403, { error: "只允许读工作区内的图片" });
@@ -566,6 +572,12 @@ const server = createServer(async (req, res) => {
 				});
 			} else if (body.kind === "dir" && Array.isArray(body.files)) {
 				for (const f of body.files) {
+					/* 单个文件也设上限：整体 JSON 限了 24MB，但没限单个文件，恶意方可以
+					 * 塞一个接近 24MB 的 base64 撑爆磁盘（立绘 / 音频都有限制，这里不该漏）。
+					 * 8MB base64 ≈ 6MB 原始，扩展文件没有这么大的。 */
+					if (f.data && f.data.length > 8 * 1024 * 1024) {
+						throw new Error("文件夹里有文件超过 8MB，请先压缩或删掉该文件");
+					}
 					/* 防路径穿越：只允许落在 workDir 内 */
 					const rel = String(f.path || "").replace(/^\.\//, "");
 					const target = resolve(workDir, rel);
@@ -824,6 +836,9 @@ const server = createServer(async (req, res) => {
 	if (path === "/api/card-import") {
 		try {
 			const text = await readFile(join(TMP_DIR, "card-import.json"), "utf-8");
+			/* AI 写坏 JSON（比如尾逗号）时，与其把半截结果发给前端让用户看到乱数据，
+			 * 不如按「还没写好」处理 —— 前端会继续轮询，直到 AI 写出合法 JSON。 */
+			JSON.parse(text);
 			res.writeHead(200, {
 				"content-type": "application/json; charset=utf-8",
 				"cache-control": "no-store",
@@ -891,7 +906,8 @@ const server = createServer(async (req, res) => {
 			/* 立绘单独落盘，JSON 里只记路径 */
 			let avatarPath = null;
 			if (form.avatar && typeof form.avatar === "string" && form.avatar.startsWith("data:image/")) {
-				const m = /^data:image\/([a-z]+);base64,(.+)$/i.exec(form.avatar);
+				/* 只收这几种位图格式：`[a-z]+` 会放进 svg+xml 这类子类型，扩展名拼出来不对 */
+				const m = /^data:image\/(jpe?g|png|webp);base64,(.+)$/i.exec(form.avatar);
 				if (m) {
 					avatarPath = join(TMP_DIR, `avatar-submitted.${m[1] === "jpeg" ? "jpg" : m[1]}`);
 					await writeFile(avatarPath, Buffer.from(m[2], "base64"));

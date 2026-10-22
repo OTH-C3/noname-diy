@@ -647,7 +647,7 @@ T("9.1 清空按钮彻底复位", async function () {
 
 T("10.1 修改已有：上传文件夹 → 解析出武将", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(300);
 	var files = makeFixtureFiles("上传测试包");
 	check("夹具文件已造出", files.length === 3, files.length + " 个");
@@ -710,26 +710,45 @@ T("10.4 修改已有提交带 editTarget", async function () {
 	check("发出 handoff", !!ho, ho ? ho.url : "没发");
 	if (!ho) return;
 	var p = ho.data;
-	check("extMode = edit", p.extMode === "edit", p.extMode);
+	check("extMode = existing", p.extMode === "existing", p.extMode);
 	check("带上 editTarget", !!p.editTarget, JSON.stringify(p.editTarget && p.editTarget.characterId));
 	check("editTarget 含原值快照", !!(p.editTarget && p.editTarget.original),
 		p.editTarget ? Object.keys(p.editTarget).join(",") : "无");
 });
 
 /* 清场：把工作区里的测试产物收拾掉 */
+/** 读扩展选择菜单里各按钮的 id，按显示顺序拼成串（用于验顺序）。
+ *  必须用 q()（指向 iframe 的 document），不能用全局 document —— 那是测试页自己。 */
+function extMenuOrder() {
+	var menu = q("#f-ext-existing .picker__menu");
+	if (!menu) return "(没找到菜单)";
+	return Array.prototype.map.call(menu.children, function (b) { return b.id; }).join(",");
+}
+
 T("11.1 扩展目标三种模式切换显示正确", async function () {
 	await resetAll();
 	pickRadio("extMode", "new"); await tick(200);
 	check("新建：扩展名输入可见", !!id("f-ext") && !id("f-ext").hidden, "hidden=" + id("f-ext").hidden);
 	pickRadio("extMode", "existing"); await tick(200);
-	check("加入已有：扩展名改为只读（由选中的 zip 决定）", id("f-ext").readOnly === true,
-		"readOnly=" + id("f-ext").readOnly);
-	check("加入已有：出现「选择 zip」按钮", id("ext-pick").hidden === false,
-		"hidden=" + id("ext-pick").hidden);
-	check("加入已有：扩展名被清空待填", id("f-ext").value === "", "「" + id("f-ext").value + "」");
-	pickRadio("extMode", "edit"); await tick(200);
-	check("修改已有：出现扩展选择", !id("f-ext-existing").hasAttribute("hidden"));
+	/* 已有拓展（原「加入已有」+「修改已有」合并）：点方框选扩展，武将下拉与武将名都在 */
+	check("已有拓展：扩展名输入框隐藏（改用点方框选择）", id("f-ext").hidden === true,
+		"hidden=" + id("f-ext").hidden);
+	check("已有拓展：出现扩展选择框", id("f-ext-existing").hidden === false,
+		"hidden=" + id("f-ext-existing").hidden);
+	check("已有拓展：官方包那项可见", id("edit-pick-official").hidden === false,
+		"hidden=" + id("edit-pick-official").hidden);
+	check("已有拓展：出现选择武将下拉", id("f-name-existing").hidden === false,
+		"hidden=" + id("f-name-existing").hidden);
+	check("已有拓展：武将名输入框也在（追加新武将时用）", id("f-name").hidden === false,
+		"hidden=" + id("f-name").hidden);
+	check("已有拓展：菜单顺序 = 工作区/官方包/文件夹/压缩包",
+		extMenuOrder() === "edit-pick-workspace,edit-pick-official,edit-pick-dir,edit-pick-zip",
+		extMenuOrder());
 	pickRadio("extMode", "new"); await tick(200);
+	check("新建：扩展选择框隐藏", id("f-ext-existing").hidden === true,
+		"hidden=" + id("f-ext-existing").hidden);
+	check("新建：选择武将下拉隐藏", id("f-name-existing").hidden === true,
+		"hidden=" + id("f-name-existing").hidden);
 });
 
 
@@ -751,16 +770,44 @@ function b64ToFile(b64, name, type) {
 	return new w.File([u8], name, { type: type });
 }
 
+T("10.5 必填项缺失：滚动定位并红色高亮该控件", async function () {
+	await resetAll();
+	pickRadio("extMode", "new");
+	await tick(150);
+	setVal(id("f-ext"), "");
+	setVal(id("f-name"), "");
+	await tick(80);
+
+	click(id("btn-handoff"));
+	await tick(250);
+	check("扩展名缺失：给出提示", /扩展名/.test(status()), status());
+	check("扩展名缺失：控件被标红", id("f-ext").classList.contains("is-flagged"),
+		id("f-ext").className);
+
+	/* 补上扩展名、留空武将名 → 这次应指向武将名 */
+	setVal(id("f-ext"), "高亮测试");
+	setVal(id("f-name"), "");
+	await tick(80);
+	click(id("btn-handoff"));
+	await tick(250);
+	check("武将名缺失：给出提示", /武将名/.test(status()), status());
+	check("武将名缺失：控件被标红", id("f-name").classList.contains("is-flagged"),
+		id("f-name").className);
+});
+
 T("12.1 加入已有：上传 zip → 自动填扩展名，不要求选武将", async function () {
 	await resetAll();
 	pickRadio("extMode", "existing");
 	await tick(300);
-	setFiles(id("f-ext-dir"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	/* 现在走共用的菜单：选 zip 用的是 edit-zip-input */
+	setFiles(id("edit-zip-input"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
 	await tick(3000);
 	check("状态提示已解析", /已解析/.test(status()), status());
 	check("扩展名被自动填入", id("f-ext").value.length > 0, "「" + id("f-ext").value + "」");
-	check("按钮变成「换一个」", /换一个/.test(id("ext-pick").textContent), id("ext-pick").textContent);
-	check("没被要求选武将（下拉仍隐藏）", id("f-name-existing").hidden === true);
+	check("选择框显示包名", /testgood|包/.test(id("f-ext-existing").textContent),
+		id("f-ext-existing").textContent.replace(/\s+/g, " ").slice(0, 60));
+	check("选择武将下拉也出现了（可改现有武将，也可不选追加）",
+		id("f-name-existing").hidden === false, "hidden=" + id("f-name-existing").hidden);
 });
 
 T("12.2 配音：单技能最多 6 个", async function () {
@@ -890,7 +937,7 @@ T("12.10 加入已有：提交带 uploadPath（AI 才知道往哪个包里加）
 	await resetAll();
 	pickRadio("extMode", "existing");
 	await tick(300);
-	setFiles(id("f-ext-dir"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	setFiles(id("edit-zip-input"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
 	await tick(3000);
 	check("上传已解析", /已解析/.test(status()), status());
 	setVal(id("f-name"), "加入喵");
@@ -1003,7 +1050,7 @@ T("13.3 卡面识别：取回的结果只填空白项，不覆盖已填内容", 
 
 T("14.1 官方包入口与选择区（结构）", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(60);
 	check("菜单里有「官方包」入口", !!id("edit-pick-official"));
 	var wrap = id("official-picker");
@@ -1015,7 +1062,7 @@ T("14.1 官方包入口与选择区（结构）", async function () {
 
 T("14.2 官方包能列出包与武将（需工作区里有游戏）", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(60);
 	click(id("edit-pick-official"));
 	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
@@ -1033,6 +1080,12 @@ T("14.2 官方包能列出包与武将（需工作区里有游戏）", async fun
 	var charSel = id("official-char");
 	await waitFor(function () { return charSel.options.length > 1; }, 120, 100);
 	check("武将下拉被填充", charSel.options.length > 1, charSel.options.length + " 项");
+
+	/* 只是选了包（还没挑武将）就该能填扩展名 —— 否则用户没处填，提交只会被拦 */
+	check("选包后就能填扩展名", id("f-new-ext").hidden === false,
+		"f-new-ext hidden=" + id("f-new-ext").hidden);
+	check("字段名已变为「扩展名」", id("name-label").textContent === "扩展名",
+		id("name-label").textContent);
 
 	var total = charSel.options.length;
 	/* 取**前两个字**当关键词：只取一个字会踩坑 —— 比如 bingshi（兵势篇）
@@ -1056,7 +1109,7 @@ T("14.2 官方包能列出包与武将（需工作区里有游戏）", async fun
 
 T("14.3 选官方武将后填表，且扩展名留空（只能另建扩展）", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(60);
 	click(id("edit-pick-official"));
 	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
@@ -1080,13 +1133,143 @@ T("14.3 选官方武将后填表，且扩展名留空（只能另建扩展）", 
 	check("技能卡被填上", skillItems().some(function (it) {
 		return (it.querySelector("input").value || "").length > 0;
 	}), skillItems().length + " 张技能卡");
+
+	/* 选官方武将 = 照着做一份新的，所以下面那组从「选择武将」切成「扩展名」 */
+	check("下方字段名变为「扩展名」", id("name-label").textContent === "扩展名",
+		id("name-label").textContent);
+	check("「选择武将」下拉隐藏", id("f-name-existing").hidden === true,
+		"hidden=" + id("f-name-existing").hidden);
+	check("「扩展名」输入框出现", id("f-new-ext").hidden === false,
+		"hidden=" + id("f-new-ext").hidden);
+	check("「武将名」仍在（官方武将名可改）", id("name-label-2").hidden === false);
+
+	/* 提交按「新建」处理：官方包是模板，产物必须是独立的新扩展 */
+	setVal(id("f-new-ext"), "官方模板测试包");
+	await tick(80);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+	var sent = lastJson();
+	check("发出了 handoff", !!sent, sent ? sent.url : "没发");
+	if (!sent) return;
+	var p = sent.data;
+	check("extMode = new（不是 existing）", p.extMode === "new", String(p.extMode));
+	check("extName 取「扩展名」框的值", p.extName === "官方模板测试包", String(p.extName));
+	check("带上 officialTemplate", !!(p.officialTemplate && p.officialTemplate.characterId),
+		p.officialTemplate ? p.officialTemplate.characterId : "无");
+	check("不带 uploadPath / editTarget", !p.uploadPath && !p.editTarget,
+		"uploadPath=" + p.uploadPath + " / editTarget=" + !!p.editTarget);
+});
+
+T("14.5 切到新建再切回：已有拓展的选择保留", async function () {
+	await resetAll();
+	pickRadio("extMode", "existing");
+	await tick(60);
+	click(id("edit-pick-official"));
+	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
+	var packSel = id("official-pack");
+	await waitFor(function () { return packSel.options.length > 1; }, 80, 100);
+	if (packSel.options.length <= 1) {
+		ok("工作区里没有官方包可读，跳过本条");
+		return;
+	}
+	packSel.value = packSel.options[1].value;
+	fire(packSel, "change");
+	var charSel = id("official-char");
+	await waitFor(function () { return charSel.options.length > 1; }, 120, 100);
+	charSel.value = charSel.options[1].value;
+	fire(charSel, "change");
+	await tick(250);
+
+	var nameBefore = id("f-name").value;
+	var charBefore = charSel.value;
+
+	pickRadio("extMode", "new");
+	await tick(150);
+	pickRadio("extMode", "existing");
+	await tick(200);
+
+	check("切回后官方包面板仍开着", id("official-picker").hidden === false,
+		"hidden=" + id("official-picker").hidden);
+	check("切回后仍是「扩展名」模式", id("f-new-ext").hidden === false,
+		"f-new-ext hidden=" + id("f-new-ext").hidden);
+	check("切回后包与武将的选择还在",
+		id("official-char").value === charBefore && id("f-name").value === nameBefore,
+		id("official-char").value + " / " + id("f-name").value);
+	check("切回后选择框仍显示包名", /假官方包/.test(id("f-ext-existing").textContent),
+		id("f-ext-existing").textContent.replace(/\s+/g, " ").slice(0, 40));
+});
+
+T("14.6 点过官方包后切新建：填的名字要生效，且不带模板标记", async function () {
+	await resetAll();
+	pickRadio("extMode", "existing");
+	await tick(60);
+	click(id("edit-pick-official"));
+	await waitFor(function () { return !id("official-picker").hidden; }, 20, 50);
+	var packSel = id("official-pack");
+	await waitFor(function () { return packSel.options.length > 1; }, 80, 100);
+	if (packSel.options.length <= 1) {
+		ok("工作区里没有官方包可读，跳过本条");
+		return;
+	}
+	packSel.value = packSel.options[1].value;
+	fire(packSel, "change");
+	await tick(400);
+
+	/* 切到新建扩展，自己填名字 —— 不能被残留的官方包状态带到 f-new-ext 上 */
+	pickRadio("extMode", "new");
+	await tick(200);
+	setVal(id("f-ext"), "新建的包");
+	setVal(id("f-name"), "测试武将");
+	await tick(80);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+
+	var sent = lastJson();
+	check("发出了 handoff", !!sent, sent ? sent.url : "没发");
+	if (!sent) return;
+	check("extName 用新建填的名字", sent.data.extName === "新建的包", String(sent.data.extName));
+	check("不带 officialTemplate", !sent.data.officialTemplate,
+		sent.data.officialTemplate ? "有" : "无");
+});
+
+T("14.7 改选扩展后，旧武将选择不残留（不带 editTarget）", async function () {
+	await resetAll();
+	pickRadio("extMode", "existing");
+	await tick(100);
+
+	setFiles(id("edit-zip-input"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	await tick(3000);
+	var chSel = id("f-name-existing");
+	await waitFor(function () { return chSel.options.length > 1; }, 60, 50);
+	chSel.value = chSel.options[1].value;
+	fire(chSel, "change");
+	await tick(250);
+	check("先选了一个武将", id("f-name").value.length > 0, id("f-name").value);
+
+	/* 再传一次 zip（等同改选扩展），不选武将 */
+	setFiles(id("edit-zip-input"), [b64ToFile(ZIP_B64, "包.zip", "application/zip")]);
+	await tick(3000);
+
+	setVal(id("f-name"), "追加新武将");
+	await tick(80);
+	installFetchSpy();
+	click(id("btn-handoff"));
+	await tick(400);
+
+	var sent = lastJson();
+	check("发出了 handoff", !!sent, sent ? sent.url : "没发");
+	if (!sent) return;
+	check("不带 editTarget（旧武将选择已清）", !sent.data.editTarget,
+		sent.data.editTarget ? "残留 characterId=" + sent.data.editTarget.characterId : "无");
 });
 
 /* ── 15. 从工作区选择已有扩展（不用找 zip）────────────────────────────── */
 
 T("15.1 「工作区里已有的扩展」入口与选择区（结构）", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(60);
 	check("菜单里有「工作区里已有的扩展」入口", !!id("edit-pick-workspace"));
 	var wrap = id("workspace-picker");
@@ -1096,7 +1279,7 @@ T("15.1 「工作区里已有的扩展」入口与选择区（结构）", async 
 
 T("15.2 点入口能列出工作区扩展，选中后扩展名就位", async function () {
 	await resetAll();
-	pickRadio("extMode", "edit");
+	pickRadio("extMode", "existing");
 	await tick(60);
 	click(id("edit-pick-workspace"));
 	await waitFor(function () { return !id("workspace-picker").hidden; }, 20, 50);
