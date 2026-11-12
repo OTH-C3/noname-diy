@@ -8,8 +8,8 @@ license: GPL-3.0
 agent_created: true
 metadata:
   author: OTH-C3
-  version: "1.2"
-  verified_against: 无名杀 v1.11.5.2 实测 / 官方 v1.11.6 源码
+  version: "1.3"
+  verified_against: 无名杀 v1.11.5.2 客户端实测 / 官方 v1.11.6.1 核心包与源码
 ---
 
 # 无名杀 DIY 武将
@@ -225,7 +225,7 @@ python scripts/pack-extension.py <扩展目录> [输出.zip]      # Windows：�
 | `references/无名杀避坑清单.md` | 动手前扫一遍：8 类根因 + 10 条自检 |
 | `references/无名杀设计审查清单.md` | **理解需求时逐类过**：六类设计错误（数值失真 / 逻辑矛盾 / 规则冲突 / 时机对不上 / 引擎卡死 / AI 自己加戏）+ 什么情况必须查规则集 |
 | `references/无名杀规则集要点.md` | 技能描述涉规则判定时（拼点、距离、结算顺序等）—— **320K** |
-| `references/skills/` | **引用官方技能 / 找同类机制**：3790 个技能名、5389 条描述 —— **1.4M** |
+| `references/skills/` | **引用官方技能 / 找同类机制**：3896 个技能名、5548 条描述（v1.11.6.1） |
 
 **大文件先 grep 定位再读命中段**（320K / 1.4M 整篇读会挤爆上下文）：
 

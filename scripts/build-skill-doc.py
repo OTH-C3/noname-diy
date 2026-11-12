@@ -131,7 +131,7 @@ print("技能名（组）：", len(gs), "｜ 有武将归属：", withhero, "／
 print("类型分布：", dict(kinds.most_common()))
 
 META = ("<!--\n  无名杀官方技能速查（自动生成，勿手改）\n"
-        "  来源：无名杀引擎源码 character/**，对照 v1.11.5.2 客户端 / 官方 v1.11.6\n"
+        "  来源：无名杀官方 v1.11.6.1 核心包（noname.core.zip）character/**\n"
         "  许可：GPL-3.0（与原游戏一致）\n"
         "  重新生成：见同目录 README.md\n-->\n\n")
 
